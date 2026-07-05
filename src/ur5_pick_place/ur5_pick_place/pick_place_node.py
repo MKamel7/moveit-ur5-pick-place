@@ -14,6 +14,7 @@ Run via the launch file so the MoveIt parameters are loaded:
 """
 from __future__ import annotations
 
+import os
 import time
 
 import rclpy
@@ -53,6 +54,25 @@ READY_STATE = "up"  # SRDF named state: arm pointing up, clear of the table
 # Grasp at the object's top surface plus a small clearance.
 GRASP_CLEARANCE = 0.005
 STANDOFF = 0.12  # pre-grasp / retreat height above the grasp
+
+# Gazebo model name of the part being carried, e.g. "part_green". When set, the
+# pick-and-place signals the part_animator over /carry_cmd so the part visibly
+# follows the gripper and then rides the conveyor. Empty = planning only.
+PART_MODEL = os.environ.get("PICK_PART_MODEL", "")
+
+# Publisher for /carry_cmd, set up in main().
+_carry_pub = None
+
+
+def _carry_signal(op: str) -> None:
+    """Tell the animator to attach/detach the carried part (best effort)."""
+    if not PART_MODEL or _carry_pub is None:
+        return
+    from std_msgs.msg import String
+
+    msg = String()
+    msg.data = f"{op}:{PART_MODEL}"
+    _carry_pub.publish(msg)
 
 
 def get_perceived_pick_top(timeout_s: float = 10.0):
@@ -180,9 +200,11 @@ def run_pick_place(robot: MoveItPy, pick_top: tuple[float, float, float]) -> boo
             return False
 
     # 3. Attach and lift. The part still touches the table, so allow that
-    #    contact (and the belt contact used at placing) before planning.
+    #    contact (and the belt contact used at placing) before planning. Signal
+    #    the animator so the gz part follows the gripper from here.
     _set_attached(robot, OBJECT_ID, attach=True)
     _allow_collisions(robot, OBJECT_ID, [TABLE_ID, CONVEYOR_ID], allow=True)
+    _carry_signal("attach")
     if not _go_to_pose(robot, arm, make_pose(lift.position, lift.orientation), "lift"):
         return False
 
@@ -192,6 +214,7 @@ def run_pick_place(robot: MoveItPy, pick_top: tuple[float, float, float]) -> boo
         return False
     if not _go_to_pose(robot, arm, make_pose(place.position, place.orientation), "place"):
         return False
+    _carry_signal("detach")  # drop it on the conveyor; the belt carries it away
     _set_attached(robot, OBJECT_ID, attach=False)
     if not _go_to_pose(robot, arm, make_pose(place_pre.position, place_pre.orientation), "retreat"):
         return False
@@ -201,7 +224,17 @@ def run_pick_place(robot: MoveItPy, pick_top: tuple[float, float, float]) -> boo
 
 
 def main() -> None:
+    global _carry_pub
     rclpy.init()
+    if PART_MODEL:
+        from rclpy.qos import DurabilityPolicy, QoSProfile
+        from std_msgs.msg import String
+
+        _comm = rclpy.create_node("pick_place_comm")
+        qos = QoSProfile(depth=1)
+        qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        _carry_pub = _comm.create_publisher(String, "/carry_cmd", qos)
+
     pick_top = get_perceived_pick_top(timeout_s=10.0)
     if pick_top is None:
         logger.warn(f"no perception detection; using fallback pick {FALLBACK_PICK_TOP}")

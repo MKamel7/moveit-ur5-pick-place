@@ -12,6 +12,11 @@ the production motion-planning framework that industry actually deploys (MoveIt 
 with OMPL) and add a perception front-end so the grasp target comes from a camera
 rather than a hardcoded pose.
 
+![The UR5e picking the selected green part and placing it on the conveyor](docs/media/demo.gif)
+
+*The operator selects a colour; the UR5e picks that part and places it on the
+conveyor, which carries it away from the table.*
+
 ![Three coloured parts detected by the RGB-D camera](docs/media/stage3_three_colors.png)
 
 *The downward RGB-D camera segments the three parts; the operator-selected colour
@@ -129,10 +134,12 @@ All numbers are from my own runs in simulation.
 ## Honest limitations
 
 - No physical gripper is modelled, and gz-sim's default dartsim engine does not
-  build the UR mesh collisions, so grasping is done at the MoveIt planning-scene
-  level (attach/detach). The arm's motion and the perception are real; the part
-  is not yet physically carried in Gazebo. Adding a gz DetachableJoint (or a
-  gripper) to physically transport the part is the next step.
+  build the UR mesh collisions, so a friction grasp is not simulated. The grasp
+  is handled at the MoveIt planning-scene level (attach/detach), and the part is
+  moved kinematically to follow the tool frame during the carry and to ride the
+  conveyor afterwards (see `part_animator.py`). The arm motion, the perception,
+  and the collision-aware planning are all real; the grasp itself is kinematic
+  rather than force-based.
 - A randomized multi-trial success-rate evaluation (parts at random positions)
   is not yet automated, so I do not quote an aggregate success rate here.
 - Screen-captured Gazebo/RViz video is not included because the machine runs a
