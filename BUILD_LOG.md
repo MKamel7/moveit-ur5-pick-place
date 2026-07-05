@@ -93,18 +93,36 @@ that part and places it on a CONVEYOR belt. Industrial framing.
 
 ## Next steps (resume here)
 1. Stage 2: collision-aware planning. Add a tall obstacle between start and goal in
-   the planning scene, show OMPL routes around it where a straight line would hit.
-   Quantify plan time and path length (add a small eval script; log numbers).
-2. Stage 3: add an RGB-D camera to the Gazebo world looking at the table, run
-   segmentation.py on the RGB image, sample depth, use perception.pixel_to_base with
-   the camera->base TF to get the pick pose (NOT hardcoded). Write a detector_node.
-   Capture camera frames as evidence. Add tests for the detector wiring.
-3. Stage 4: randomized 10-trial eval (>=8/10 success), one-command launch that starts
-   sim + runs demo, GitHub Actions CI (colcon build + pytest), finish README with
-   measured numbers + demo GIF (built from camera frames), one CV bullet.
-   Then: gh auth (needs workflow scope, interactive), create PUBLIC repo
-   moveit-ur5-pick-place under MKamel7, push, confirm CI green.
-4. THEN Project 2 (llm-robot-commander) per the brief.
+   the planning scene, show OMPL routes around it. (DONE, committed.)
+2. Stage 3 perception + industrial 3-colour + conveyor. (DONE, committed. Full
+   perception-driven pick-and-place onto the belt runs end to end, result SUCCESS.)
+3. CI + README. (DONE, committed. `colcon test` verified 40 tests 0 failures locally.)
+
+REMAINING WORK (resume executes these, in priority order):
+A. Physical grasp so the part actually moves to the belt (user explicitly wants this).
+   Add a gz DetachableJoint (lib exists: libgz-sim8-detachable-joint-system) or a
+   gripper: attach part<->flange at grasp, detach at place. Trigger via gz topics
+   from pick_place_node at the grasp/release moments. Verify the part physically
+   moves in Gazebo. This also makes a demo video meaningful.
+B. Demo GIF/video: add a wide-angle "scene_camera" to the world viewing arm+table+
+   belt, bridge it, subscribe and save frames during a pick run, assemble a GIF with
+   imageio/ffmpeg. Embed in README (replaces the note about no motion video).
+   NOTE: scrot/import capture BLACK for Gazebo (Wayland); use the in-sim camera.
+C. Randomized eval: script that respawns the 3 parts at random table positions via
+   the gz set-pose service (/world/pick_place/set_pose), picks a random target colour,
+   runs the perception->pick->place, and counts successes over 10 trials. Target >=8/10.
+   Log the aggregate number; update README (remove the "no aggregate rate" caveat).
+D. gh auth WITH workflow scope (interactive, Mohamed must do: `gh auth login` then
+   `gh auth refresh -h github.com -s workflow`). Then create PUBLIC repo
+   moveit-ur5-pick-place under MKamel7, push all commits, confirm CI green, give link.
+   If gh is not authed during an unattended run, write the exact push commands here.
+E. THEN Project 2 (llm-robot-commander) per the brief. Ollama user-space install
+   (tarball to ~/.local, no sudo), pull qwen3:8b.
+
+Current state: clean git tree, 6 commits, all authored Mohamed Kamel, no AI attribution.
+A demo sim can be launched with:
+   ros2 launch ur5_pick_place demo_bringup.launch.py target_color:=green
+   ros2 launch ur5_pick_place pick_place.launch.py
 
 ## Overnight auto-resume mechanism (set up 2026-07-05 ~02:41 CEST)
 - Script: `scripts/auto_resume.sh`. Relaunches `claude -p ... --dangerously-skip-permissions`
