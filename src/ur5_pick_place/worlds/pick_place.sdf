@@ -95,6 +95,7 @@
 
     <!-- Three coloured parts on the table top (centre z = 0.225). -->
     <model name="part_red">
+      <static>true</static>
       <pose>0.50 0.02 0.225 0 0 0</pose>
       <link name="link">
         <inertial><mass>0.05</mass>
@@ -107,6 +108,7 @@
       </link>
     </model>
     <model name="part_green">
+      <static>true</static>
       <pose>0.55 0.17 0.225 0 0 0</pose>
       <link name="link">
         <inertial><mass>0.05</mass>
@@ -119,6 +121,7 @@
       </link>
     </model>
     <model name="part_blue">
+      <static>true</static>
       <pose>0.50 0.32 0.225 0 0 0</pose>
       <link name="link">
         <inertial><mass>0.05</mass>
@@ -131,13 +134,31 @@
       </link>
     </model>
 
+    <!-- Wide-angle scene camera for recording the whole workcell. -->
+    <model name="scene_camera">
+      <static>true</static>
+      <pose>1.9 -0.2 1.2 0 0.62 3.0</pose>
+      <link name="link">
+        <sensor name="scene" type="camera">
+          <update_rate>12</update_rate>
+          <always_on>true</always_on>
+          <topic>scene_camera</topic>
+          <camera>
+            <horizontal_fov>1.2</horizontal_fov>
+            <image><width>800</width><height>600</height><format>R8G8B8</format></image>
+            <clip><near>0.05</near><far>10.0</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+
     <!-- Downward-looking RGB-D camera above the table. -->
     <model name="rgbd_camera">
       <static>true</static>
       <pose>0.55 0.15 0.85 0 1.5707963 0</pose>
       <link name="link">
         <sensor name="rgbd" type="rgbd_camera">
-          <update_rate>15</update_rate>
+          <update_rate>8</update_rate>
           <always_on>true</always_on>
           <visualize>true</visualize>
           <topic>rgbd_camera</topic>

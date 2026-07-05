@@ -60,6 +60,7 @@ def generate_launch_description():
             "/rgbd_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
             "/rgbd_camera/depth_image@sensor_msgs/msg/Image[gz.msgs.Image",
             "/rgbd_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+            "/scene_camera@sensor_msgs/msg/Image[gz.msgs.Image",
         ],
         parameters=[{"use_sim_time": True}],
     )
@@ -70,6 +71,14 @@ def generate_launch_description():
         name="object_detector",
         output="screen",
         parameters=[{"use_sim_time": True, "target_color": target_color}],
+    )
+
+    animator = Node(
+        package="ur5_pick_place",
+        executable="part_animator",
+        name="part_animator",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
     )
 
     return LaunchDescription(
@@ -84,5 +93,6 @@ def generate_launch_description():
             ur_moveit,
             camera_bridge,
             detector,
+            animator,
         ]
     )

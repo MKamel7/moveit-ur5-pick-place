@@ -18,8 +18,8 @@ PLAN_REQUEST_PARAMS = {
         "planning_attempts": 10,
         "planning_pipeline": "ompl",
         "planner_id": "RRTConnectkConfigDefault",
-        "max_velocity_scaling_factor": 0.1,
-        "max_acceleration_scaling_factor": 0.1,
+        "max_velocity_scaling_factor": 0.3,
+        "max_acceleration_scaling_factor": 0.3,
         "planning_time": 5.0,
     }
 }
