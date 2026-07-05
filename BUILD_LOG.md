@@ -4,6 +4,72 @@ This file is a running journal so work can resume cleanly across sessions
 (including after any usage limit reset). Newest entries at the bottom of each
 section. It doubles as the RESUME file requested in the brief.
 
+## >>> RESUME HERE (read this first) <<<  (last updated 2026-07-05, session paused)
+
+**Where the project lives:** `/home/kamel/moveit-ur5-pick-place` (git repo, 12 commits,
+all authored Mohamed Kamel, NO AI attribution). Not yet pushed to GitHub (gh needs
+interactive auth with `workflow` scope first: `gh auth login` then
+`gh auth refresh -h github.com -s workflow`).
+
+**How to continue when you come back:**
+- Resume this exact conversation: `claude -c` (in this repo dir), or
+- Fresh session: `claude -p "continue the build per BUILD_LOG.md"`, or
+- Let the overnight cron do it (if you installed it): see the auto-resume section below.
+
+**Run the demo (sim):**
+    ros2 launch ur5_pick_place demo_bringup.launch.py target_color:=green   # bring up
+    PICK_MODE=all ros2 launch ur5_pick_place pick_place.launch.py           # sort all 3
+Tests: `cd src/ur5_pick_place && python3 -m pytest test/ -q` (40 pass).
+
+**What genuinely works (verified):** perception (1-2 mm), collision-aware OMPL planning
+(4.07x obstacle detour), the arm executes the full pick/place motion, single + all-three
+modes, front-only motion constraint, CI, README. The CORE robotics is solid.
+
+### KNOWN ISSUES from Mohamed's review (FIX THESE FIRST, in priority order)
+The visual demo is NOT good yet. The part motion is faked kinematically (set_pose in
+part_animator.py) because there is no physical gripper, and it looks bad:
+1. **Objects fall off / drop from the arm.** The kinematic follow (part_animator following
+   tool0 via set_pose) does not look attached; parts appear to drop. FIX: implement a
+   REAL grasp. Best option: gz DetachableJoint (lib exists,
+   libgz-sim8-detachable-joint-system; supports attach_topic AND detach_topic) attaching
+   the part model to tool0 (or a gripper link) on grasp and detaching on release, so
+   physics holds it. Alternatively add an actual gripper (e.g. Robotiq) to ur_gz. Retire
+   the set_pose follow hack.
+2. **Placing looks like dropping.** The place motion releases the part above the belt
+   instead of setting it down gently. FIX: lower fully to the belt surface before release;
+   add a short controlled descent; only detach once the part rests on the belt.
+3. **Conveyor belt is in the wrong place** (Mohamed: it seems to be partly under the arm).
+   Current: CONVEYOR_POSE=(0.50,-0.38,0.075), size (0.30,0.80,0.15) in worlds/pick_place.sdf
+   AND mirrored constants in pick_place_node.py. It sits too close to the robot base/
+   workspace. FIX: move the belt to a clearly separate, dedicated location (e.g. further to
+   one side / further in front), not overlapping the arm's working volume, and update BOTH
+   the SDF and pick_place_node.py PLACE_XYZ/CONVEYOR_* to match. Keep table and belt as
+   distinct stations both reachable but clearly separated.
+4. **Pick-and-place motion quality is poor / slow.** The front-only shoulder_pan constraint
+   (SHOULDER_PAN_LIMIT in pick_place_node.py) made planning slow (~30 s/pick) and the paths
+   are not smooth. FIX: consider fixed joint-space waypoints for the table<->belt transit
+   (a "table_ready" and "belt_ready" pose) instead of free pose planning, so motion is
+   repeatable and smooth; tune velocity scaling; verify no behind-the-base rotation remains.
+
+### Also still TODO after the above (original plan)
+- Demo GIF (docs/media/demo.gif) and showcase (docs/demo_showcase.html, artifact URL
+  https://claude.ai/code/artifact/57243c63-80ee-447f-aadc-a3a95d538996) must be
+  RE-RECORDED once the grasp/belt/motion are fixed (current GIF shows the bad version).
+- Randomized 10-trial success eval (>=8/10), report aggregate rate in README.
+- gh auth + create PUBLIC repo moveit-ur5-pick-place under MKamel7, push, confirm CI green.
+- THEN Project 2 (llm-robot-commander) per the brief (Ollama user-space install, qwen3:8b).
+
+### Handy notes for the fixer
+- Restarting the sim: many orphan gz/move_group processes survive `ros2 launch` parent
+  kills. Kill by binary match:
+    ps -eo pid,cmd | grep -iE "install/ur5_pick_place/lib|moveit_ros_move_group|gz sim server|ros_gz_bridge|controller_manager|ur_moveit|spawner" | grep -v grep | awk '{print $1}' | xargs -r kill -9
+  then `ros2 daemon stop && ros2 daemon start` to clear stale discovery ghosts, then relaunch.
+- Gazebo is native Wayland; scrot/import capture BLACK. Record via the in-sim /scene_camera
+  topic (see scratchpad record_scene.py pattern) and assemble with ffmpeg.
+- part_animator has a `reset:all` /carry_cmd command to move parts back to the table, but
+  its set_pose timeout (100 ms) can fail silently under load; a fresh sim restart is more
+  reliable for a clean starting state.
+
 ## Environment (decided once, 2026-07-05)
 - Machine: Ubuntu 24.04.4, 12 cores, 15 GB RAM.
 - ROS 2 Jazzy installed at /opt/ros/jazzy (source it before ROS work).
