@@ -10,9 +10,15 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# apt logs kept during setup
-.apt-update.log
-.apt-install.log
+# transient run/setup logs (curated evidence lives in docs/media/*.txt)
+*.log
+docs/auto_resume_logs/
+
+# overnight auto-resume tooling (local only, not part of the portfolio)
+scripts/auto_resume.sh
+.auto_resume_arm_epoch
+.auto_resume.lock
+.auto_resume_done
 
 # editor / OS
 .vscode/
