@@ -1,0 +1,153 @@
+<?xml version="1.0" ?>
+<!--
+  Industrial color-sorting world for the vision-guided UR5e.
+
+  A source table holds three coloured parts (red, green, blue). A downward
+  RGB-D camera views the table. The operator selects a colour; the arm picks
+  that part and places it on the conveyor belt. Includes the gz Sensors system
+  so the camera renders. The UR5e is spawned into this world by the bringup.
+-->
+<sdf version="1.10">
+  <world name="pick_place">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry>
+          <material><ambient>0.8 0.8 0.8 1</ambient><diffuse>0.8 0.8 0.8 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Source table: top surface at z = 0.20 -->
+    <model name="table">
+      <static>true</static>
+      <pose>0.55 0.15 0.10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.40 0.55 0.20</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.40 0.55 0.20</size></box></geometry>
+          <material><ambient>0.6 0.4 0.2 1</ambient><diffuse>0.6 0.4 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Conveyor belt: place target, top surface at z = 0.15 -->
+    <model name="conveyor">
+      <static>true</static>
+      <pose>0.50 -0.38 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.30 0.80 0.15</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.30 0.80 0.15</size></box></geometry>
+          <material><ambient>0.15 0.15 0.15 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <!-- Belt side rails (visual only), for an industrial look -->
+    <model name="rail_left">
+      <static>true</static>
+      <pose>0.365 -0.38 0.16 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.02 0.80 0.03</size></box></geometry>
+          <material><ambient>0.8 0.7 0.0 1</ambient><diffuse>0.9 0.8 0.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="rail_right">
+      <static>true</static>
+      <pose>0.635 -0.38 0.16 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.02 0.80 0.03</size></box></geometry>
+          <material><ambient>0.8 0.7 0.0 1</ambient><diffuse>0.9 0.8 0.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Three coloured parts on the table top (centre z = 0.225). -->
+    <model name="part_red">
+      <pose>0.50 0.02 0.225 0 0 0</pose>
+      <link name="link">
+        <inertial><mass>0.05</mass>
+          <inertia><ixx>2e-5</ixx><iyy>2e-5</iyy><izz>2e-5</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <collision name="collision"><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+          <material><ambient>0.8 0.0 0.0 1</ambient><diffuse>0.9 0.0 0.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="part_green">
+      <pose>0.55 0.17 0.225 0 0 0</pose>
+      <link name="link">
+        <inertial><mass>0.05</mass>
+          <inertia><ixx>2e-5</ixx><iyy>2e-5</iyy><izz>2e-5</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <collision name="collision"><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+          <material><ambient>0.0 0.8 0.0 1</ambient><diffuse>0.0 0.9 0.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="part_blue">
+      <pose>0.50 0.32 0.225 0 0 0</pose>
+      <link name="link">
+        <inertial><mass>0.05</mass>
+          <inertia><ixx>2e-5</ixx><iyy>2e-5</iyy><izz>2e-5</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <collision name="collision"><geometry><box><size>0.05 0.05 0.05</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+          <material><ambient>0.0 0.0 0.8 1</ambient><diffuse>0.0 0.0 0.9 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Downward-looking RGB-D camera above the table. -->
+    <model name="rgbd_camera">
+      <static>true</static>
+      <pose>0.55 0.15 0.85 0 1.5707963 0</pose>
+      <link name="link">
+        <sensor name="rgbd" type="rgbd_camera">
+          <update_rate>15</update_rate>
+          <always_on>true</always_on>
+          <visualize>true</visualize>
+          <topic>rgbd_camera</topic>
+          <camera>
+            <horizontal_fov>1.0472</horizontal_fov>
+            <image><width>640</width><height>480</height><format>R8G8B8</format></image>
+            <clip><near>0.05</near><far>5.0</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+  </world>
+</sdf>

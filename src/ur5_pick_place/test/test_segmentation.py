@@ -7,7 +7,11 @@ These tests build synthetic images so the behaviour is deterministic.
 import cv2
 import numpy as np
 import pytest
-from ur5_pick_place.segmentation import sample_depth, segment_largest_blob
+from ur5_pick_place.segmentation import (
+    COLOR_HSV_RANGES,
+    sample_depth,
+    segment_largest_blob,
+)
 
 # HSV range for a saturated green object (OpenCV hue is 0..179).
 GREEN = [((40, 80, 80), (80, 255, 255))]
@@ -55,6 +59,32 @@ def test_segment_rejects_when_blob_below_min_area():
 def test_segment_returns_none_when_colour_absent():
     img = np.zeros((480, 640, 3), dtype=np.uint8)  # all black
     assert segment_largest_blob(img, GREEN, min_area=500) is None
+
+
+def _solid(color_bgr, x1, y1, x2, y2, size=(480, 640)):
+    img = np.zeros((size[0], size[1], 3), dtype=np.uint8)
+    cv2.rectangle(img, (x1, y1), (x2, y2), color_bgr, -1)
+    return img
+
+
+def test_color_presets_detect_their_own_colour_and_reject_others():
+    # BGR fills for saturated red, green, blue parts.
+    parts = {
+        "red": (0, 0, 255),
+        "green": (0, 255, 0),
+        "blue": (255, 0, 0),
+    }
+    for name, bgr in parts.items():
+        img = _solid(bgr, 250, 180, 390, 300)
+        det = segment_largest_blob(img, COLOR_HSV_RANGES[name], min_area=500)
+        assert det is not None, f"{name} preset failed to detect its own colour"
+        assert det.u == pytest.approx(320, abs=3)
+        # Each preset must reject the other two colours.
+        for other, obgr in parts.items():
+            if other == name:
+                continue
+            other_img = _solid(obgr, 250, 180, 390, 300)
+            assert segment_largest_blob(other_img, COLOR_HSV_RANGES[name], min_area=500) is None
 
 
 def test_sample_depth_median_over_patch():
