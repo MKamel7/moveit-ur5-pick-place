@@ -26,6 +26,7 @@ setup(
     entry_points={
         "console_scripts": [
             "pick_place_node = ur5_pick_place.pick_place_node:main",
+            "obstacle_demo = ur5_pick_place.obstacle_demo:main",
         ],
     },
 )
