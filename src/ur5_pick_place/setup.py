@@ -25,7 +25,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            # Nodes are registered here as they are implemented in later stages.
+            "pick_place_node = ur5_pick_place.pick_place_node:main",
         ],
     },
 )
