@@ -11,7 +11,9 @@ import numpy as np
 import pytest
 from ur5_pick_place.perception import (
     CameraIntrinsics,
+    camera_optical_transform,
     deproject_pixel_to_camera,
+    euler_to_quaternion,
     pixel_to_base,
     transform_matrix_from_quaternion,
     transform_point,
@@ -96,6 +98,31 @@ def test_pixel_to_base_downward_camera(intr):
     # the camera at height 1.2 - 0.9 = 0.3 m.
     p_base = pixel_to_base(320.0, 240.0, 0.9, intr, T_base_optical)
     np.testing.assert_allclose(p_base, [0.4, 0.0, 0.3], atol=1e-9)
+
+
+def test_euler_to_quaternion_pitch_90_matches_matrix():
+    # Pitch +90 deg about Y maps +x -> -z.
+    q = euler_to_quaternion(0.0, math.pi / 2, 0.0)
+    T = transform_matrix_from_quaternion([0, 0, 0], q)
+    np.testing.assert_allclose(transform_point(T, [1.0, 0.0, 0.0]), [0.0, 0.0, -1.0], atol=1e-9)
+
+
+def test_camera_optical_transform_downward_camera_looks_down():
+    # Camera body pitched 90 deg (looking down) at height 0.85. The optical
+    # z-axis (view direction) must point straight down in the base frame.
+    T = camera_optical_transform([0.55, 0.0, 0.85], [0.0, math.pi / 2, 0.0])
+    optical_z_in_base = T[:3, :3] @ np.array([0.0, 0.0, 1.0])
+    np.testing.assert_allclose(optical_z_in_base, [0.0, 0.0, -1.0], atol=1e-9)
+    np.testing.assert_allclose(T[:3, 3], [0.55, 0.0, 0.85], atol=1e-9)
+
+
+def test_camera_optical_transform_recovers_known_object(intr):
+    # A downward camera at (0.55, 0, 0.85). An object directly below it appears
+    # at the image centre; at range r its base position is (0.55, 0, 0.85 - r).
+    T = camera_optical_transform([0.55, 0.0, 0.85], [0.0, math.pi / 2, 0.0])
+    r = 0.60
+    p_base = pixel_to_base(intr.cx, intr.cy, r, intr, T)
+    np.testing.assert_allclose(p_base, [0.55, 0.0, 0.25], atol=1e-9)
 
 
 def test_pixel_to_base_matches_manual_composition(intr):

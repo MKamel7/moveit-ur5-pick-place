@@ -61,6 +61,36 @@ Key technical facts learned (IMPORTANT for resume):
   (saves to ~/.gz/gui/pictures).
 - moveit_py can SIGSEGV during C++ teardown after the result prints; main() guards it.
 
+### Stage 3: RGB-D perception -> 3D pose - DONE (single object), then expanded
+- Custom gz world `worlds/pick_place.sdf` with the gz Sensors system, a table, a
+  downward RGB-D camera (topic /rgbd_camera/*), and coloured parts.
+- `detector_node.py`: subscribes rgb+depth+camera_info, HSV-segments the parts,
+  samples depth, lifts to base frame via perception.camera_optical_transform +
+  pixel_to_base, publishes /detected_object_pose. VERIFIED: recovered a green box
+  at base (0.551, 0.098, 0.250) vs true (0.55, 0.10, 0.25-top) -> 1-2 mm in x,y.
+  Evidence: docs/media/stage3_detection.png.
+- `demo_bringup.launch.py`: ur_sim_control(world_file) + ur_moveit + camera bridge
+  (ros_gz_bridge) + detector. One command. RViz OFF (Gazebo+RViz overwhelmed the
+  iGPU and RViz hung; not needed since planning runs in move_group).
+
+### Industrial redesign (per user request, IN PROGRESS)
+User wants: 3 coloured parts (red/green/blue), operator selects a colour, arm picks
+that part and places it on a CONVEYOR belt. Industrial framing.
+- World now has red/green/blue parts on the table + a conveyor belt (place target)
+  with yellow side rails. Camera centred at (0.55,0.15,0.85).
+- segmentation.py: added COLOR_HSV_RANGES (red is two ranges for hue wrap). Tested.
+- detector_node: `target_color` param (red/green/blue), detects all three, annotates
+  all in the debug image, publishes only the selected colour's pose.
+- pick_place_node: places on the conveyor (PLACE_XYZ on belt top); adds table+belt to
+  the scene; FIX for the lift/place start-state collision via ACM
+  (_allow_collisions sets allowed_collision_matrix entries object<->table/belt).
+- demo_bringup: `target_color` launch arg (default green). Choose with
+  `ros2 launch ur5_pick_place demo_bringup.launch.py target_color:=red`.
+- 40 unit tests pass, ruff clean.
+- STILL TO VERIFY: full perception-driven pick-and-place onto the belt end-to-end
+  with the ACM fix (the lift previously failed on table-object contact; ACM added but
+  not yet run). Then randomized/multi-colour eval, evidence GIF, CI, README, push.
+
 ## Next steps (resume here)
 1. Stage 2: collision-aware planning. Add a tall obstacle between start and goal in
    the planning scene, show OMPL routes around it where a straight line would hit.

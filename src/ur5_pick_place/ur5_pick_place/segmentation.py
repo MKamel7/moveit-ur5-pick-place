@@ -16,6 +16,14 @@ import numpy as np
 
 HsvRange = tuple[Sequence[int], Sequence[int]]
 
+# HSV colour presets for the industrial parts (OpenCV hue 0..179). Red wraps the
+# hue axis so it needs two ranges.
+COLOR_HSV_RANGES: dict[str, list[HsvRange]] = {
+    "red": [((0, 90, 60), (10, 255, 255)), ((170, 90, 60), (179, 255, 255))],
+    "green": [((35, 70, 40), (85, 255, 255))],
+    "blue": [((100, 120, 40), (130, 255, 255))],
+}
+
 
 @dataclass(frozen=True)
 class Detection:

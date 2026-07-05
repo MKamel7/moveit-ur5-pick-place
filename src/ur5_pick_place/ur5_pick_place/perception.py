@@ -89,6 +89,52 @@ def transform_matrix_from_quaternion(
     return T
 
 
+# Rotation from a ROS camera body/link frame (x forward, y left, z up) to its
+# optical frame (z forward, x right, y down), per REP 103. Columns are the
+# optical axes expressed in the body frame.
+_R_BODY_OPTICAL = np.array(
+    [
+        [0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+    ]
+)
+
+
+def euler_to_quaternion(roll: float, pitch: float, yaw: float) -> np.ndarray:
+    """Convert roll/pitch/yaw (radians) to a quaternion [x, y, z, w].
+
+    Uses the gz/URDF convention R = Rz(yaw) @ Ry(pitch) @ Rx(roll).
+    """
+    cr, sr = np.cos(roll / 2), np.sin(roll / 2)
+    cp, sp = np.cos(pitch / 2), np.sin(pitch / 2)
+    cy, sy = np.cos(yaw / 2), np.sin(yaw / 2)
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+    w = cr * cp * cy + sr * sp * sy
+    return np.array([x, y, z, w], dtype=float)
+
+
+def camera_optical_transform(translation: Sequence[float], rpy: Sequence[float]) -> np.ndarray:
+    """Transform from the camera optical frame to the base frame (base_T_optical).
+
+    Args:
+        translation: camera body position in the base frame [x, y, z].
+        rpy: camera body orientation in the base frame [roll, pitch, yaw], radians,
+            using the gz/URDF convention (as written in an SDF/URDF <pose>).
+
+    Returns:
+        A 4x4 transform mapping optical-frame points into the base frame, suitable
+        for ``pixel_to_base``.
+    """
+    q = euler_to_quaternion(rpy[0], rpy[1], rpy[2])
+    t_base_body = transform_matrix_from_quaternion(translation, q)
+    t_body_optical = np.eye(4)
+    t_body_optical[:3, :3] = _R_BODY_OPTICAL
+    return t_base_body @ t_body_optical
+
+
 def transform_point(T: np.ndarray, p: Sequence[float]) -> np.ndarray:
     """Apply a 4x4 homogeneous transform to a 3D point."""
     T = np.asarray(T, dtype=float)
