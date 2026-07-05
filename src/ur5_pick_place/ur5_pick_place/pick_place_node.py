@@ -4,13 +4,18 @@ Adds the table and target box to the planning scene, plans a top-down grasp
 with OMPL, attaches the object, lifts, moves to a place location, and detaches.
 The grasp geometry comes from ``ur5_pick_place.grasp`` (the unit-tested core).
 
-The pick location comes from perception: it waits for a pose on
-/detected_object_pose (published by the detector from the RGB-D camera). If no
-detection arrives within the timeout it falls back to a fixed pose so the node
-can also run against the plain (camera-less) sim.
+The pick location comes from perception: the detector publishes each colour's
+pose on /detected/<colour> (and the selected one on /detected_object_pose).
+
+Two modes, selected by the PICK_MODE environment variable:
+    single (default): pick the colour in PICK_COLOR (default "green").
+    all:              sort red, then green, then blue onto the conveyor.
+The arm returns to its ready posture at the end of either mode.
 
 Run via the launch file so the MoveIt parameters are loaded:
-    ros2 launch ur5_pick_place pick_place.launch.py
+    ros2 launch ur5_pick_place pick_place.launch.py                      # single/green
+    PICK_MODE=all ros2 launch ur5_pick_place pick_place.launch.py        # sort all three
+    PICK_COLOR=red ros2 launch ur5_pick_place pick_place.launch.py       # single/red
 """
 from __future__ import annotations
 
@@ -55,50 +60,47 @@ READY_STATE = "up"  # SRDF named state: arm pointing up, clear of the table
 GRASP_CLEARANCE = 0.005
 STANDOFF = 0.12  # pre-grasp / retreat height above the grasp
 
-# Gazebo model name of the part being carried, e.g. "part_green". When set, the
-# pick-and-place signals the part_animator over /carry_cmd so the part visibly
-# follows the gripper and then rides the conveyor. Empty = planning only.
-PART_MODEL = os.environ.get("PICK_PART_MODEL", "")
+# Which coloured part to carry in single mode, e.g. "green". Empty = planning only.
+SINGLE_COLOR = os.environ.get("PICK_COLOR", "green")
+# "single" picks SINGLE_COLOR; "all" sorts red, then green, then blue.
+PICK_MODE = os.environ.get("PICK_MODE", "single")
+COLOR_ORDER = ("red", "green", "blue")
 
 # Publisher for /carry_cmd, set up in main().
 _carry_pub = None
 
 
-def _carry_signal(op: str) -> None:
-    """Tell the animator to attach/detach the carried part (best effort)."""
-    if not PART_MODEL or _carry_pub is None:
+def _carry_signal(op: str, part_model: str) -> None:
+    """Tell the animator to attach/detach a carried part (best effort)."""
+    if _carry_pub is None:
         return
     from std_msgs.msg import String
 
     msg = String()
-    msg.data = f"{op}:{PART_MODEL}"
+    msg.data = f"{op}:{part_model}"
     _carry_pub.publish(msg)
 
 
-def get_perceived_pick_top(timeout_s: float = 10.0):
-    """Wait for one /detected_object_pose and return its (x, y, z) top-centre.
-
-    Returns None if no detection arrives within the timeout.
-    """
+def get_perceived_top(topic: str, timeout_s: float = 8.0):
+    """Wait for one PoseStamped on ``topic`` and return its (x, y, z). None on timeout."""
     from geometry_msgs.msg import PoseStamped
+    from rclpy.qos import DurabilityPolicy, QoSProfile
 
+    qos = QoSProfile(depth=1)
+    qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
     node = rclpy.create_node("pick_place_perception_client")
     result = {}
 
     def cb(msg: PoseStamped) -> None:
         result["xyz"] = (msg.pose.position.x, msg.pose.position.y, msg.pose.position.z)
 
-    node.create_subscription(PoseStamped, "/detected_object_pose", cb, 10)
+    # /detected/<color> is latched; /detected_object_pose is not, so subscribe to both compatibly.
+    node.create_subscription(PoseStamped, topic, cb, qos if topic.startswith("/detected/") else 10)
     deadline = time.time() + timeout_s
     while rclpy.ok() and "xyz" not in result and time.time() < deadline:
         rclpy.spin_once(node, timeout_sec=0.2)
     node.destroy_node()
     return result.get("xyz")
-
-# Grasp at the object's top surface (half height + a small clearance) so the
-# flange rests on top of the box rather than penetrating the collision volume.
-GRASP_Z_OFFSET = OBJECT_SIZE[2] / 2.0 + 0.005
-STANDOFF = 0.12  # pre-grasp / retreat height above the grasp
 
 
 def _plan_and_execute(robot: MoveItPy, arm, label: str, attempts: int = 3) -> bool:
@@ -164,89 +166,139 @@ def _allow_collisions(robot: MoveItPy, object_id: str, surface_ids, allow: bool)
         scene.current_state.update()
 
 
-def run_pick_place(robot: MoveItPy, pick_top: tuple[float, float, float]) -> bool:
-    """Execute the full pick-and-place given the object top-centre. True on success."""
-    arm = robot.get_planning_component(PLANNING_GROUP)
-
-    half_h = OBJECT_SIZE[2] / 2.0
-    object_center = (pick_top[0], pick_top[1], pick_top[2] - half_h)
-    grasp_z_offset = half_h + GRASP_CLEARANCE  # grasp tool0 at the top surface + clearance
-
-    # 0. Move to a clear "ready" posture with an empty scene so the arm is not
-    #    intersecting the table when it is added.
-    if not _go_to_named(robot, arm, READY_STATE, "ready"):
-        return False
-
-    # 1. Build the scene (source table, conveyor belt, and the perceived object).
+def _build_static_scene(robot: MoveItPy) -> None:
     _apply_object(robot, make_box(TABLE_ID, BASE_FRAME, TABLE_SIZE, TABLE_POSE))
     _apply_object(robot, make_box(CONVEYOR_ID, BASE_FRAME, CONVEYOR_SIZE, CONVEYOR_POSE))
-    _apply_object(robot, make_box(OBJECT_ID, BASE_FRAME, OBJECT_SIZE, object_center))
-    time.sleep(0.5)
 
-    # 2. Grasp geometry from the unit-tested core.
+
+# Keep the base joint in the front hemisphere: the table and belt are both in
+# front of the robot, so this forbids the arm swinging the long way round behind
+# itself (short-way motion only).
+SHOULDER_PAN_LIMIT = 1.7  # radians either side of 0
+
+
+def _apply_front_constraint(arm) -> None:
+    from moveit_msgs.msg import Constraints, JointConstraint
+
+    c = Constraints()
+    c.name = "front_only"
+    jc = JointConstraint()
+    jc.joint_name = "shoulder_pan_joint"
+    jc.position = 0.0
+    jc.tolerance_above = SHOULDER_PAN_LIMIT
+    jc.tolerance_below = SHOULDER_PAN_LIMIT
+    jc.weight = 1.0
+    c.joint_constraints.append(jc)
+    arm.set_path_constraints(c)
+
+
+def pick_one(robot: MoveItPy, arm, pick_top, part_model: str) -> bool:
+    """Pick the part at ``pick_top`` and place it on the conveyor. True on success.
+
+    Assumes the arm starts clear of the table (e.g. at the ready posture) and the
+    static scene (table, belt) is already applied.
+    """
+    half_h = OBJECT_SIZE[2] / 2.0
+    object_center = (pick_top[0], pick_top[1], pick_top[2] - half_h)
+    grasp_z_offset = half_h + GRASP_CLEARANCE
+
+    _apply_object(robot, make_box(OBJECT_ID, BASE_FRAME, OBJECT_SIZE, object_center))
+    time.sleep(0.3)
+
     grasp = top_down_grasp(object_center, z_offset=grasp_z_offset)
     pre = pregrasp_pose(grasp, STANDOFF)
     lift = retreat_pose(grasp, STANDOFF)
-
     place = top_down_grasp(PLACE_XYZ, z_offset=grasp_z_offset)
     place_pre = pregrasp_pose(place, STANDOFF)
 
-    steps = [
+    for label, gp in (
         ("pre-grasp", make_pose(pre.position, pre.orientation)),
         ("grasp", make_pose(grasp.position, grasp.orientation)),
-    ]
-    for label, pose in steps:
-        if not _go_to_pose(robot, arm, pose, label):
+    ):
+        if not _go_to_pose(robot, arm, gp, label):
             return False
 
-    # 3. Attach and lift. The part still touches the table, so allow that
-    #    contact (and the belt contact used at placing) before planning. Signal
-    #    the animator so the gz part follows the gripper from here.
     _set_attached(robot, OBJECT_ID, attach=True)
     _allow_collisions(robot, OBJECT_ID, [TABLE_ID, CONVEYOR_ID], allow=True)
-    _carry_signal("attach")
+    _carry_signal("attach", part_model)
     if not _go_to_pose(robot, arm, make_pose(lift.position, lift.orientation), "lift"):
         return False
 
-    # 4. Transfer to the conveyor, place, detach.
-    transfer_pose = make_pose(place_pre.position, place_pre.orientation)
-    if not _go_to_pose(robot, arm, transfer_pose, "transfer"):
+    transfer = make_pose(place_pre.position, place_pre.orientation)
+    if not _go_to_pose(robot, arm, transfer, "transfer"):
         return False
     if not _go_to_pose(robot, arm, make_pose(place.position, place.orientation), "place"):
         return False
-    _carry_signal("detach")  # drop it on the conveyor; the belt carries it away
+    _carry_signal("detach", part_model)  # drop on the belt; the conveyor carries it away
     _set_attached(robot, OBJECT_ID, attach=False)
     if not _go_to_pose(robot, arm, make_pose(place_pre.position, place_pre.orientation), "retreat"):
         return False
 
-    logger.info("pick-and-place complete: part placed on the conveyor")
+    logger.info(f"{part_model} placed on the conveyor")
     return True
+
+
+def run_single(robot: MoveItPy, color: str) -> bool:
+    """Pick one selected colour and return the arm home."""
+    arm = robot.get_planning_component(PLANNING_GROUP)
+    _apply_front_constraint(arm)
+    if not _go_to_named(robot, arm, READY_STATE, "ready"):
+        return False
+    _build_static_scene(robot)
+    time.sleep(0.3)
+
+    top = get_perceived_top(f"/detected/{color}") or get_perceived_top("/detected_object_pose")
+    if top is None:
+        logger.warn(f"no perception for '{color}'; using fallback pick")
+        top = FALLBACK_PICK_TOP
+    logger.info(f"picking '{color}' at {tuple(round(c, 3) for c in top)}")
+
+    ok = pick_one(robot, arm, top, f"part_{color}")
+    _go_to_named(robot, arm, READY_STATE, "home")  # return to initial posture
+    return ok
+
+
+def run_all(robot: MoveItPy) -> bool:
+    """Sort all three parts onto the conveyor, then return the arm home."""
+    arm = robot.get_planning_component(PLANNING_GROUP)
+    _apply_front_constraint(arm)
+    if not _go_to_named(robot, arm, READY_STATE, "ready"):
+        return False
+    _build_static_scene(robot)
+    time.sleep(0.3)
+
+    all_ok = True
+    for color in COLOR_ORDER:
+        top = get_perceived_top(f"/detected/{color}")
+        if top is None:
+            logger.warn(f"'{color}' not detected; skipping")
+            all_ok = False
+            continue
+        logger.info(f"picking '{color}' at {tuple(round(c, 3) for c in top)}")
+        # After placing, the next part's pre-grasp takes the arm straight back to
+        # the table (no detour through the home pose).
+        if not pick_one(robot, arm, top, f"part_{color}"):
+            all_ok = False
+    _go_to_named(robot, arm, READY_STATE, "home")  # return to initial posture at the end
+    return all_ok
 
 
 def main() -> None:
     global _carry_pub
     rclpy.init()
-    if PART_MODEL:
-        from rclpy.qos import DurabilityPolicy, QoSProfile
-        from std_msgs.msg import String
+    from rclpy.qos import DurabilityPolicy, QoSProfile
+    from std_msgs.msg import String
 
-        _comm = rclpy.create_node("pick_place_comm")
-        qos = QoSProfile(depth=1)
-        qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
-        _carry_pub = _comm.create_publisher(String, "/carry_cmd", qos)
-
-    pick_top = get_perceived_pick_top(timeout_s=10.0)
-    if pick_top is None:
-        logger.warn(f"no perception detection; using fallback pick {FALLBACK_PICK_TOP}")
-        pick_top = FALLBACK_PICK_TOP
-    else:
-        logger.info(f"perceived pick top-centre: {tuple(round(c, 3) for c in pick_top)}")
+    _comm = rclpy.create_node("pick_place_comm")
+    qos = QoSProfile(depth=1)
+    qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+    _carry_pub = _comm.create_publisher(String, "/carry_cmd", qos)
 
     robot = MoveItPy(node_name="ur5_pick_place")
-    logger.info("MoveItPy up; starting perception-driven pick-and-place")
+    logger.info(f"MoveItPy up; mode={PICK_MODE}")
     ok = False
     try:
-        ok = run_pick_place(robot, pick_top)
+        ok = run_all(robot) if PICK_MODE == "all" else run_single(robot, SINGLE_COLOR)
         logger.info(f"result: {'SUCCESS' if ok else 'FAILURE'}")
     finally:
         # moveit_py can segfault during C++ teardown; guard so it never masks

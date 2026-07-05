@@ -26,6 +26,13 @@ WORLD_NAME = "pick_place"
 TOOL_FRAME = "tool0"
 BASE_FRAME = "base_link"
 
+# Home positions of the parts on the table (match the world SDF).
+PART_HOMES = {
+    "part_red": (0.50, 0.02, 0.225),
+    "part_green": (0.55, 0.17, 0.225),
+    "part_blue": (0.50, 0.32, 0.225),
+}
+
 CARRY_DROP = 0.03  # part centre below the tool frame while carried
 BELT_TOP_Z = 0.175  # part centre resting on the belt
 BELT_X = 0.50
@@ -62,6 +69,14 @@ class PartAnimator(Node):
 
     def on_cmd(self, msg: String) -> None:
         op, _, part = msg.data.partition(":")
+        if op == "reset":
+            with self.lock:
+                self.carried = None
+                self.on_belt.clear()
+            for name, home in PART_HOMES.items():
+                self._set_pose(name, *home)
+            self.get_logger().info("parts reset to the table")
+            return
         if not part:
             return
         with self.lock:
