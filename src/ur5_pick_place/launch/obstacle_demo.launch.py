@@ -1,10 +1,7 @@
-"""Launch the moveit_py pick-and-place node against a running UR5e sim.
+"""Launch the moveit_py obstacle-avoidance demo against a running UR5e sim.
 
-Bring up the simulation first (Gazebo + MoveIt + RViz):
     ros2 launch ur_simulation_gz ur_sim_moveit.launch.py ur_type:=ur5e
-
-then run this to execute the pick-and-place:
-    ros2 launch ur5_pick_place pick_place.launch.py
+    ros2 launch ur5_pick_place obstacle_demo.launch.py
 """
 from launch import LaunchDescription
 from launch_ros.actions import Node
@@ -16,7 +13,7 @@ def generate_launch_description():
         [
             Node(
                 package="ur5_pick_place",
-                executable="pick_place_node",
+                executable="obstacle_demo",
                 output="screen",
                 parameters=moveit_params(),
             )

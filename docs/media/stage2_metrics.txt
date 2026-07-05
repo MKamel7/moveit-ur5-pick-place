@@ -1,0 +1,8 @@
+naive straight-line A->B intersects wall: True
+=== Stage 2 measured results ===
+straight-line EE distance A->B (chord): 0.500 m
+baseline (no wall)  : plan 0.025 s, joint path 1.581 rad
+around wall         : plan 0.086 s, joint path 6.435 rad
+detour factor (joint path): 4.07x
+obstacle-aware plan executed collision-free
+result: SUCCESS
