@@ -59,13 +59,38 @@ class DetectorNode(Node):
         self._logged = False
         self._saved_debug = False
 
+        from rclpy.qos import DurabilityPolicy, QoSProfile
+
+        latched = QoSProfile(depth=1)
+        latched.durability = DurabilityPolicy.TRANSIENT_LOCAL
+
         self.create_subscription(CameraInfo, "/rgbd_camera/camera_info", self.on_info, 10)
         self.create_subscription(Image, "/rgbd_camera/depth_image", self.on_depth, 10)
         self.create_subscription(Image, "/rgbd_camera/image", self.on_image, 10)
         self.pub = self.create_publisher(PoseStamped, "/detected_object_pose", 10)
+        # One latched pose per colour so a picker can read any colour on demand.
+        self.color_pubs = {
+            c: self.create_publisher(PoseStamped, f"/detected/{c}", latched)
+            for c in COLOR_HSV_RANGES
+        }
         self.get_logger().info(
             f"object_detector started; target_color={self.target_color}; waiting for camera"
         )
+
+    def _pose_for(self, det):
+        try:
+            z = sample_depth(self.depth, det.u, det.v, patch=5)
+        except ValueError:
+            return None
+        p = pixel_to_base(det.u, det.v, z, self.intr, self.t_base_optical)
+        pose = PoseStamped()
+        pose.header.frame_id = self.base_frame
+        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.pose.position.x = float(p[0])
+        pose.pose.position.y = float(p[1])
+        pose.pose.position.z = float(p[2])
+        pose.pose.orientation.w = 1.0
+        return pose
 
     def on_info(self, msg: CameraInfo) -> None:
         if self.intr is None:
@@ -91,27 +116,20 @@ class DetectorNode(Node):
             if det is not None:
                 detections[color] = det
 
-        target = detections.get(self.target_color)
-        if target is not None:
-            try:
-                z = sample_depth(self.depth, target.u, target.v, patch=5)
-            except ValueError:
-                z = None
-            if z is not None:
-                p = pixel_to_base(target.u, target.v, z, self.intr, self.t_base_optical)
-                pose = PoseStamped()
-                pose.header.frame_id = self.base_frame
-                pose.header.stamp = self.get_clock().now().to_msg()
-                pose.pose.position.x = float(p[0])
-                pose.pose.position.y = float(p[1])
-                pose.pose.position.z = float(p[2])
-                pose.pose.orientation.w = 1.0
+        # Publish a pose for every detected colour, and echo the selected target
+        # on /detected_object_pose for the single-colour picker.
+        for color, det in detections.items():
+            pose = self._pose_for(det)
+            if pose is None:
+                continue
+            self.color_pubs[color].publish(pose)
+            if color == self.target_color:
                 self.pub.publish(pose)
                 if not self._logged:
+                    p = pose.pose.position
                     self.get_logger().info(
-                        f"target '{self.target_color}' at pixel "
-                        f"({target.u:.0f},{target.v:.0f}) depth {z:.3f} m -> "
-                        f"base ({p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f})"
+                        f"target '{self.target_color}' -> base "
+                        f"({p.x:.3f}, {p.y:.3f}, {p.z:.3f})"
                     )
                     self._logged = True
 
