@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    # Lints and runs the ROS-independent core tests (perception, grasp,
+    # segmentation, metrics). These need only numpy, OpenCV and pytest, so they
+    # run quickly on a plain runner.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install numpy==1.26.4 opencv-python-headless==4.9.0.80 scipy==1.11.4 pytest==7.4.4 ruff==0.15.20
+      - name: Ruff lint
+        run: ruff check src/
+      - name: Run unit tests
+        run: PYTHONPATH=src/ur5_pick_place python -m pytest src/ur5_pick_place/test -v
+
+  colcon-build:
+    # Builds the ament package and runs its tests inside a ROS 2 Jazzy container
+    # so the colcon workspace is verified buildable from scratch.
+    runs-on: ubuntu-latest
+    container:
+      image: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build/test dependencies
+        run: |
+          apt-get update
+          apt-get install -y python3-opencv python3-numpy python3-scipy python3-pytest python3-colcon-common-extensions
+      - name: colcon build
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --packages-select ur5_pick_place
+      - name: colcon test
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          colcon test --packages-select ur5_pick_place --pytest-args -v
+          colcon test-result --verbose
