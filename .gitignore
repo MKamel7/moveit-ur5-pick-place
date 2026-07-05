@@ -25,3 +25,7 @@ scripts/auto_resume.sh
 .idea/
 *.swp
 .DS_Store
+
+# generated showcase and debug captures (large / transient)
+docs/demo_showcase.html
+docs/media/scene_check.png
