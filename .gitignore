@@ -1,0 +1,21 @@
+# colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# apt logs kept during setup
+.apt-update.log
+.apt-install.log
+
+# editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
