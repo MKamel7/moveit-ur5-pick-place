@@ -19,7 +19,13 @@
        Set use_mock_hardware:=false robot_ip:=<UR IP> to drive real hardware. -->
   <xacro:arg name="use_mock_hardware" default="true"/>
   <xacro:arg name="robot_ip" default="0.0.0.0"/>
+  <!-- The gripper hardware is independent of the arm: with URSim (arm-only) the
+       arm can be real while the gripper stays mock. Defaults to the arm setting. -->
+  <xacro:arg name="use_mock_gripper" default="true"/>
   <xacro:arg name="gripper_com_port" default="/dev/ttyUSB0"/>
+  <!-- Real UR driver: headless (inject the control script) + reverse connection. -->
+  <xacro:arg name="headless_mode" default="false"/>
+  <xacro:arg name="reverse_ip" default="0.0.0.0"/>
 
   <!-- The arm is mounted on a pedestal so it works downward over the cell from
        above (the industrial workcell layout). base_link sits mount_h above the
@@ -68,8 +74,10 @@
     tf_prefix="$(arg tf_prefix)"
     use_mock_hardware="$(arg use_mock_hardware)"
     robot_ip="$(arg robot_ip)"
+    headless_mode="$(arg headless_mode)"
+    reverse_ip="$(arg reverse_ip)"
     kinematics_parameters_file="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"
-    script_filename="$(find ur_robot_driver)/resources/ros_control.urscript"
+    script_filename="$(find ur_client_library)/resources/external_control.urscript"
     input_recipe_filename="$(find ur_robot_driver)/resources/rtde_input_recipe.txt"
     output_recipe_filename="$(find ur_robot_driver)/resources/rtde_output_recipe.txt"/>
 
@@ -96,10 +104,10 @@
        tags. Mock hardware in simulation; the real Robotiq driver otherwise. -->
   <ros2_control name="RobotiqGripper" type="system">
     <hardware>
-      <xacro:if value="$(arg use_mock_hardware)">
+      <xacro:if value="$(arg use_mock_gripper)">
         <plugin>mock_components/GenericSystem</plugin>
       </xacro:if>
-      <xacro:unless value="$(arg use_mock_hardware)">
+      <xacro:unless value="$(arg use_mock_gripper)">
         <plugin>robotiq_driver/RobotiqGripperHardwareInterface</plugin>
         <param name="gripper_closed_position">0.7929</param>
         <param name="COM_port">$(arg gripper_com_port)</param>
