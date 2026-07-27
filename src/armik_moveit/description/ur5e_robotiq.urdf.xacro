@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<!--
+  UR5e with a Robotiq 2F-85 gripper (Phase 2).
+
+  Composes three stock descriptions into one robot so the same model drives both
+  ros2_control and MoveIt:
+    - the UR5e arm (ur_description) + its mock-hardware ros2_control system,
+    - the UR-to-Robotiq adapter plate mounted on tool0,
+    - the Robotiq 2F-85 gripper (robotiq_description) + its mock-hardware
+      ros2_control system.
+
+  The 2F-85 mirrors the gripper from the Phase 1 MuJoCo palletizing cell, now on
+  the industry-standard ROS stack. Mock hardware only (no real robot/gripper).
+-->
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="ur5e_robotiq">
+  <xacro:arg name="ur_type" default="ur5e"/>
+  <xacro:arg name="tf_prefix" default=""/>
+
+  <!-- The arm is mounted on a pedestal so it works downward over the cell from
+       above (the industrial workcell layout). base_link sits mount_h above the
+       floor; the cell geometry in scene.py is offset down by the same amount. -->
+  <xacro:property name="mount_h" value="0.40"/>
+
+  <link name="world"/>
+
+  <!-- Pedestal stand from the floor up to the arm base -->
+  <link name="pedestal">
+    <visual>
+      <origin xyz="0 0 ${mount_h/2}" rpy="0 0 0"/>
+      <geometry><box size="0.20 0.20 ${mount_h}"/></geometry>
+      <material name="pedestal_gray"><color rgba="0.28 0.28 0.30 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${mount_h/2 - 0.01}" rpy="0 0 0"/>
+      <geometry><box size="0.20 0.20 ${mount_h - 0.02}"/></geometry>
+    </collision>
+  </link>
+  <joint name="world_to_pedestal" type="fixed">
+    <parent link="world"/>
+    <child link="pedestal"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- UR arm description, base raised onto the pedestal -->
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:ur_robot
+    name="ur5e"
+    tf_prefix="$(arg tf_prefix)"
+    parent="world"
+    joint_limits_parameters_file="$(find ur_description)/config/$(arg ur_type)/joint_limits.yaml"
+    kinematics_parameters_file="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"
+    physical_parameters_file="$(find ur_description)/config/$(arg ur_type)/physical_parameters.yaml"
+    visual_parameters_file="$(find ur_description)/config/$(arg ur_type)/visual_parameters.yaml"
+    safety_limits="true">
+    <origin xyz="0 0 ${mount_h}" rpy="0 0 0"/>
+  </xacro:ur_robot>
+
+  <!-- Arm ros2_control: mock hardware (mirrors command to state) -->
+  <xacro:include filename="$(find ur_description)/urdf/ros2_control_mock_hardware.xacro"/>
+  <xacro:ur_ros2_control name="ur5e" tf_prefix="$(arg tf_prefix)"/>
+
+  <!-- Adapter plate on the arm flange -->
+  <xacro:include filename="$(find robotiq_description)/urdf/ur_to_robotiq_adapter.urdf.xacro"/>
+  <xacro:ur_to_robotiq prefix="$(arg tf_prefix)" connected_to="$(arg tf_prefix)tool0"/>
+
+  <!-- Robotiq 2F-85 gripper links/joints only. Its bundled ros2_control block is
+       skipped (include_ros2_control=false): with mock hardware it puts command
+       interfaces on the mimic joints, which mock_components/GenericSystem rejects
+       ("activated mimic joints cannot have command interfaces"). -->
+  <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro"/>
+  <xacro:robotiq_gripper
+    name="RobotiqGripper"
+    prefix="$(arg tf_prefix)"
+    parent="$(arg tf_prefix)gripper_mount_link"
+    use_fake_hardware="true"
+    include_ros2_control="false">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:robotiq_gripper>
+
+  <!-- Minimal gripper ros2_control: drive only the active knuckle joint. The
+       five mimic finger joints are computed by robot_state_publisher from the
+       URDF mimic tags, so they need no command/state interfaces here. -->
+  <ros2_control name="RobotiqGripper" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <joint name="$(arg tf_prefix)robotiq_85_left_knuckle_joint">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+</robot>
