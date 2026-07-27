@@ -30,12 +30,23 @@ def launch_setup(context, *args, **kwargs):
     pkg = get_package_share_directory("armik_moveit")
     use_mock = LaunchConfiguration("use_mock_hardware").perform(context)
     robot_ip = LaunchConfiguration("robot_ip").perform(context)
+    # The gripper defaults to the arm's setting but can be forced mock so a real
+    # arm (or URSim, which has no gripper) runs with a simulated 2F-85.
+    use_mock_gripper = LaunchConfiguration("use_mock_gripper").perform(context) or use_mock
+    headless_mode = LaunchConfiguration("headless_mode").perform(context)
+    reverse_ip = LaunchConfiguration("reverse_ip").perform(context)
 
     moveit_config = (
         MoveItConfigsBuilder("ur5e_robotiq", package_name="armik_moveit")
         .robot_description(
             file_path="description/ur5e_robotiq.urdf.xacro",
-            mappings={"use_mock_hardware": use_mock, "robot_ip": robot_ip},
+            mappings={
+                "use_mock_hardware": use_mock,
+                "robot_ip": robot_ip,
+                "use_mock_gripper": use_mock_gripper,
+                "headless_mode": headless_mode,
+                "reverse_ip": reverse_ip,
+            },
         )
         .robot_description_semantic(file_path="config/ur5e_robotiq.srdf.xacro")
         .robot_description_kinematics(file_path="config/kinematics.yaml")
@@ -113,6 +124,13 @@ def generate_launch_description():
                                   description="Mock hardware (true) or real UR5e + Robotiq (false)."),
             DeclareLaunchArgument("robot_ip", default_value="0.0.0.0",
                                   description="UR5e IP address (real hardware only)."),
+            DeclareLaunchArgument("use_mock_gripper", default_value="",
+                                  description="Force the gripper mock (true) even with a real arm; "
+                                              "empty follows use_mock_hardware."),
+            DeclareLaunchArgument("headless_mode", default_value="false",
+                                  description="Real UR driver: inject the control script (URSim/headless)."),
+            DeclareLaunchArgument("reverse_ip", default_value="0.0.0.0",
+                                  description="IP the robot connects back to (real driver reverse connection)."),
             OpaqueFunction(function=launch_setup),
         ]
     )
