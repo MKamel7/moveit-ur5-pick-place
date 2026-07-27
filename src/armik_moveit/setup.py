@@ -31,6 +31,8 @@ setup(
             "detector = armik_moveit.detector:main",
             "color_sort = armik_moveit.color_sort:main",
             "sort_gui = armik_moveit.sort_gui:main",
+            "opcua_server = armik_moveit.opcua_server:main",
+            "dashboard = armik_moveit.dashboard:main",
         ],
     },
 )
