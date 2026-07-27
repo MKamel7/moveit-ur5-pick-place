@@ -91,6 +91,8 @@ async def run_server(bridge):
     v_clear = await safety.add_variable(idx, "ClearToRun", False)
     v_speed = await safety.add_variable(idx, "SpeedScale", 0.0)
 
+    last_safety = {}
+
     async with server:
         print(f"OPC UA server up at {ENDPOINT}")
         print("  write CellController/TargetColour = red|green|blue to command a sort")
@@ -112,10 +114,14 @@ async def run_server(bridge):
                 bridge.command(cmd)
                 await v_cmd.write_value("")
 
-            # safety: mirror the writable inputs onto the /safety topics ...
-            bridge.set_safety("estop", await v_estop.get_value())
-            bridge.set_safety("guard_closed", await v_guard.get_value())
-            bridge.set_safety("human_present", await v_human.get_value())
+            # safety: mirror the writable inputs onto the /safety topics, but only
+            # on change so this does not fight other publishers (e.g. the GUI).
+            for name, var in (("estop", v_estop), ("guard_closed", v_guard),
+                              ("human_present", v_human)):
+                val = bool(await var.get_value())
+                if last_safety.get(name) != val:
+                    bridge.set_safety(name, val)
+                    last_safety[name] = val
             if await v_reset.get_value():
                 bridge.set_safety("reset", True)
                 await v_reset.write_value(False)
