@@ -45,6 +45,10 @@ speed slider); it is a one-line swap in the controller config.
 ## Status
 
 The hardware-ready description and launch are provided and the mock path is fully
-verified. The real-hardware path is validated only in simulation here (no physical
-UR5e was available); the interfaces, parameters, and bringup follow the standard
-Universal Robots + Robotiq ROS 2 driver setup.
+verified. The **real hardware path is validated in hardware-in-the-loop against
+URSim** (Universal Robots' official simulator, which runs the real URControl and
+RTDE): the real `ur_robot_driver` connects over RTDE, the UR controllers activate,
+and MoveIt plans and executes motion on the (simulated-real) robot end to end (see
+`hardware_hil_verification.txt`). On a physical UR5e the same commands apply, plus
+the kinematics calibration above. Only the Robotiq gripper (not part of URSim) is
+unexercised, its driver follows the standard robotiq_driver setup.
