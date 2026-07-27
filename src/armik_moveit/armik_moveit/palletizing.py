@@ -114,6 +114,7 @@ class Palletizer(Node):
         self.scene = self.create_client(ApplyPlanningScene, "/apply_planning_scene")
         self.ik = self.create_client(GetPositionIK, "/compute_ik")
         self.replans = 0
+        self.speed_factor = 1.0  # scaled down by the safety layer (SSM)
 
     # --- planning scene ---
     def _apply(self, scene_msg):
@@ -244,8 +245,8 @@ class Palletizer(Node):
         req.planner_id = planner
         req.num_planning_attempts = 1
         req.allowed_planning_time = 5.0
-        req.max_velocity_scaling_factor = vel
-        req.max_acceleration_scaling_factor = vel
+        req.max_velocity_scaling_factor = vel * self.speed_factor
+        req.max_acceleration_scaling_factor = vel * self.speed_factor
         return req
 
     def move_config(self, config, vel=0.6, label=""):
@@ -264,8 +265,8 @@ class Palletizer(Node):
             req.group_name = GROUP  # default OMPL pipeline
             req.num_planning_attempts = 16
             req.allowed_planning_time = 12.0
-            req.max_velocity_scaling_factor = vel
-            req.max_acceleration_scaling_factor = vel
+            req.max_velocity_scaling_factor = vel * self.speed_factor
+            req.max_acceleration_scaling_factor = vel * self.speed_factor
             c = Constraints()
             for j, v in zip(ARM_JOINTS, config):
                 c.joint_constraints.append(JointConstraint(

@@ -19,7 +19,7 @@ import threading
 import rclpy
 from asyncua import Server
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 ENDPOINT = "opc.tcp://0.0.0.0:4840/cell/"
 NS_URI = "http://mkamel.robotcell"
@@ -29,8 +29,16 @@ class Bridge(Node):
     def __init__(self):
         super().__init__("opcua_bridge")
         self.latest = {}
+        self.safety = {}
         self._pub = self.create_publisher(String, "/target_color", 10)
         self.create_subscription(String, "/cell/telemetry", self._on_tele, 10)
+        self.create_subscription(String, "/safety/state", self._on_safety, 10)
+        self._safety_pubs = {
+            "estop": self.create_publisher(Bool, "/safety/estop", 10),
+            "guard_closed": self.create_publisher(Bool, "/safety/guard_closed", 10),
+            "human_present": self.create_publisher(Bool, "/safety/human_present", 10),
+            "reset": self.create_publisher(Bool, "/safety/reset", 10),
+        }
 
     def _on_tele(self, msg):
         try:
@@ -38,8 +46,17 @@ class Bridge(Node):
         except json.JSONDecodeError:
             pass
 
+    def _on_safety(self, msg):
+        try:
+            self.safety = json.loads(msg.data)
+        except json.JSONDecodeError:
+            pass
+
     def command(self, color):
         self._pub.publish(String(data=str(color)))
+
+    def set_safety(self, name, value):
+        self._safety_pubs[name].publish(Bool(data=bool(value)))
 
 
 async def run_server(bridge):
@@ -62,6 +79,18 @@ async def run_server(bridge):
     v_alarm = await cell.add_variable(idx, "Alarm", False)
     v_amsg = await cell.add_variable(idx, "AlarmMessage", "")
 
+    # Safety I/O: a safety PLC writes these and reads the resulting safe state.
+    safety = await server.nodes.objects.add_object(idx, "Safety")
+    v_estop = await safety.add_variable(idx, "EStop", False)
+    v_guard = await safety.add_variable(idx, "GuardClosed", True)
+    v_human = await safety.add_variable(idx, "HumanPresent", False)
+    v_reset = await safety.add_variable(idx, "Reset", False)
+    for v in (v_estop, v_guard, v_human, v_reset):
+        await v.set_writable()
+    v_sstate = await safety.add_variable(idx, "SafetyState", "INIT")
+    v_clear = await safety.add_variable(idx, "ClearToRun", False)
+    v_speed = await safety.add_variable(idx, "SpeedScale", 0.0)
+
     async with server:
         print(f"OPC UA server up at {ENDPOINT}")
         print("  write CellController/TargetColour = red|green|blue to command a sort")
@@ -82,6 +111,19 @@ async def run_server(bridge):
             if cmd:
                 bridge.command(cmd)
                 await v_cmd.write_value("")
+
+            # safety: mirror the writable inputs onto the /safety topics ...
+            bridge.set_safety("estop", await v_estop.get_value())
+            bridge.set_safety("guard_closed", await v_guard.get_value())
+            bridge.set_safety("human_present", await v_human.get_value())
+            if await v_reset.get_value():
+                bridge.set_safety("reset", True)
+                await v_reset.write_value(False)
+            # ... and reflect the resulting safe state back
+            s = bridge.safety
+            await v_sstate.write_value(str(s.get("state", "INIT")))
+            await v_clear.write_value(bool(s.get("clear_to_run", False)))
+            await v_speed.write_value(float(s.get("speed_scale", 0.0)))
             await asyncio.sleep(0.3)
 
 

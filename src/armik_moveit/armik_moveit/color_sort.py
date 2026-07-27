@@ -42,12 +42,28 @@ class ColorSorter(Palletizer):
         self.t_start = time.time()
         self.alarm = False
         self.alarm_msg = ""
+        # safety state, driven by the safety_supervisor
+        self.safe = True
+        self.safety_state = "RUN"
+        self.safety_reason = "ok"
+        self.speed_scale = 1.0
         self.create_subscription(String, "/target_color", self._on_color, 10)
+        self.create_subscription(String, "/safety/state", self._on_safety, 10)
         self.tele = self.create_publisher(String, "/cell/telemetry", 10)
         self.create_timer(1.0, self.publish_telemetry)
 
     def _on_color(self, msg):
         self.pending = msg.data.strip().lower()
+
+    def _on_safety(self, msg):
+        try:
+            s = json.loads(msg.data)
+        except json.JSONDecodeError:
+            return
+        self.safe = bool(s.get("clear_to_run", True))
+        self.safety_state = s.get("state", "?")
+        self.safety_reason = s.get("reason", "")
+        self.speed_scale = float(s.get("speed_scale", 1.0))
 
     def publish_telemetry(self):
         sorted_total = sum(self.counts.values())
@@ -66,6 +82,10 @@ class ColorSorter(Palletizer):
             "uptime_s": round(uptime, 1),
             "alarm": self.alarm,
             "alarm_msg": self.alarm_msg,
+            "safety_state": self.safety_state,
+            "clear_to_run": self.safe,
+            "speed_scale": round(self.speed_scale, 2),
+            "safety_reason": self.safety_reason,
         }
         self.tele.publish(String(data=json.dumps(tele)))
 
@@ -125,7 +145,14 @@ class ColorSorter(Palletizer):
             self.publish_telemetry()
             print(f"  rejected: no {color} object on the board")
             return
+        if not self.safe:
+            # safety interlock: refuse to start motion when the cell is not safe
+            self.alarm, self.alarm_msg = True, f"safety interlock ({self.safety_reason})"
+            self.publish_telemetry()
+            print(f"  refused: safety interlock ({self.safety_state}: {self.safety_reason})")
+            return
         self.alarm, self.alarm_msg = False, ""
+        self.speed_factor = self.speed_scale  # apply SSM speed reduction
         self.state, self.current = "sorting", color
         self.publish_telemetry()
         x, y = self.part_pos[color]

@@ -33,6 +33,7 @@ setup(
             "sort_gui = armik_moveit.sort_gui:main",
             "opcua_server = armik_moveit.opcua_server:main",
             "dashboard = armik_moveit.dashboard:main",
+            "safety_supervisor = armik_moveit.safety_supervisor:main",
         ],
     },
 )

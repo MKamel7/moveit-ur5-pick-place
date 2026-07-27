@@ -15,6 +15,11 @@
 <robot xmlns:xacro="http://wiki.ros.org/xacro" name="ur5e_robotiq">
   <xacro:arg name="ur_type" default="ur5e"/>
   <xacro:arg name="tf_prefix" default=""/>
+  <!-- Hardware selection: mock (simulation, default) vs real UR5e + Robotiq.
+       Set use_mock_hardware:=false robot_ip:=<UR IP> to drive real hardware. -->
+  <xacro:arg name="use_mock_hardware" default="true"/>
+  <xacro:arg name="robot_ip" default="0.0.0.0"/>
+  <xacro:arg name="gripper_com_port" default="/dev/ttyUSB0"/>
 
   <!-- The arm is mounted on a pedestal so it works downward over the cell from
        above (the industrial workcell layout). base_link sits mount_h above the
@@ -55,9 +60,18 @@
     <origin xyz="0 0 ${mount_h}" rpy="0 0 0"/>
   </xacro:ur_robot>
 
-  <!-- Arm ros2_control: mock hardware (mirrors command to state) -->
-  <xacro:include filename="$(find ur_description)/urdf/ros2_control_mock_hardware.xacro"/>
-  <xacro:ur_ros2_control name="ur5e" tf_prefix="$(arg tf_prefix)"/>
+  <!-- Arm ros2_control: the UR driver's interface, which selects mock hardware
+       or the real UR5e (RTDE at robot_ip) from use_mock_hardware. -->
+  <xacro:include filename="$(find ur_robot_driver)/urdf/ur.ros2_control.xacro"/>
+  <xacro:ur_ros2_control
+    name="ur5e"
+    tf_prefix="$(arg tf_prefix)"
+    use_mock_hardware="$(arg use_mock_hardware)"
+    robot_ip="$(arg robot_ip)"
+    kinematics_parameters_file="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"
+    script_filename="$(find ur_robot_driver)/resources/ros_control.urscript"
+    input_recipe_filename="$(find ur_robot_driver)/resources/rtde_input_recipe.txt"
+    output_recipe_filename="$(find ur_robot_driver)/resources/rtde_output_recipe.txt"/>
 
   <!-- Adapter plate on the arm flange -->
   <xacro:include filename="$(find robotiq_description)/urdf/ur_to_robotiq_adapter.urdf.xacro"/>
@@ -77,12 +91,21 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </xacro:robotiq_gripper>
 
-  <!-- Minimal gripper ros2_control: drive only the active knuckle joint. The
-       five mimic finger joints are computed by robot_state_publisher from the
-       URDF mimic tags, so they need no command/state interfaces here. -->
+  <!-- Gripper ros2_control: drive only the active knuckle joint. The five mimic
+       finger joints are computed by robot_state_publisher from the URDF mimic
+       tags. Mock hardware in simulation; the real Robotiq driver otherwise. -->
   <ros2_control name="RobotiqGripper" type="system">
     <hardware>
-      <plugin>mock_components/GenericSystem</plugin>
+      <xacro:if value="$(arg use_mock_hardware)">
+        <plugin>mock_components/GenericSystem</plugin>
+      </xacro:if>
+      <xacro:unless value="$(arg use_mock_hardware)">
+        <plugin>robotiq_driver/RobotiqGripperHardwareInterface</plugin>
+        <param name="gripper_closed_position">0.7929</param>
+        <param name="COM_port">$(arg gripper_com_port)</param>
+        <param name="gripper_speed_multiplier">1.0</param>
+        <param name="gripper_force_multiplier">0.5</param>
+      </xacro:unless>
     </hardware>
     <joint name="$(arg tf_prefix)robotiq_85_left_knuckle_joint">
       <command_interface name="position"/>

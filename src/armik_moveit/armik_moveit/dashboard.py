@@ -44,6 +44,12 @@ header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:.3px}
 <header><span class="dot" id="live" style="background:var(--ok)"></span>
 <h1>Colour Sorting Cell — Live Monitor</h1><span id="state">--</span></header>
 <div class="wrap">
+<div id="safety" style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:10px;margin-bottom:16px;border:1px solid var(--line);background:var(--card);font-weight:600">
+ <span class="dot" id="sdot" style="background:var(--mut)"></span>
+ <span>SAFETY: <span id="sstate">--</span></span>
+ <span id="sreason" style="color:var(--mut);font-weight:400"></span>
+ <span style="margin-left:auto;color:var(--mut);font-weight:400">Speed <span id="sspeed">--</span></span>
+</div>
 <div id="alarm"></div>
 <div class="kpis">
  <div class="kpi"><div class="v" id="parts">0</div><div class="l">Parts sorted</div></div>
@@ -70,6 +76,13 @@ async function tick(){
   const c=t.counts||{}, mx=Math.max(1,c.red||0,c.green||0,c.blue||0);
   const set=(f,n,v)=>{document.getElementById(f).style.width=(100*(v||0)/mx)+'%';document.getElementById(n).textContent=v||0};
   set('fr','nr',c.red);set('fg','ng',c.green);set('fb','nb',c.blue);
+  const ss=t.safety_state||'--';
+  document.getElementById('sstate').textContent=ss;
+  document.getElementById('sreason').textContent=t.safety_reason?('— '+t.safety_reason):'';
+  document.getElementById('sspeed').textContent=Math.round(100*(t.speed_scale!=null?t.speed_scale:1))+'%';
+  const col={RUN:'var(--ok)',REDUCED:'var(--warn)',ESTOP:'var(--red)',GUARD_STOP:'var(--red)',FAULT:'var(--red)',INIT:'var(--mut)'}[ss]||'var(--mut)';
+  document.getElementById('sdot').style.background=col;
+  document.getElementById('safety').style.borderColor=(ss==='RUN'||ss==='INIT')?'var(--line)':col;
   const a=document.getElementById('alarm');
   if(t.alarm){a.style.display='block';a.textContent='ALARM: '+(t.alarm_msg||'fault')}else{a.style.display='none'}
   document.getElementById('live').style.background='var(--ok)';
