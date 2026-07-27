@@ -62,9 +62,13 @@ PART_COLORS = {
 # conveyor belt. Three colour-coded parts sit on the bin; a button picks one.
 CONVEYOR = ((0.24, 0.44, 0.14), (0.47, 0.36, 0.07), (0.16, 0.16, 0.18))
 SORT_STRUCTURES = {"table": TABLE, "supply_bin": SUPPLY_BIN, "conveyor": CONVEYOR}
-SORT_PARTS = {  # colour -> (x, y) on the bin top
+SORT_COLOURS = ["red", "green", "blue"]
+SORT_PARTS = {  # legacy fixed layout (kept for reference)
     "red": (0.41, -0.38), "green": (0.47, -0.32), "blue": (0.53, -0.26),
 }
+# Random spawn region on the bin top (x_min, x_max, y_min, y_max), with a margin
+# inside the bin footprint so parts land fully on the surface.
+BIN_AREA = (0.40, 0.55, -0.41, -0.23)
 CONVEYOR_TOP = CONVEYOR[1][2] + CONVEYOR[0][2] / 2 - MOUNT_H  # base_link frame
 CONVEYOR_DROP = (0.47, 0.36)  # place x,y on the belt
 

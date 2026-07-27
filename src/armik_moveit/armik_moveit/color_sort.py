@@ -11,6 +11,8 @@ place it on the conveyor belt.
     ros2 run   armik_moveit sort_gui                          # the 3 buttons
 """
 import json
+import math
+import random
 import sys
 import time
 
@@ -19,8 +21,8 @@ from std_msgs.msg import String
 
 from armik_moveit.palletizing import HOME, PART_SIZE, Palletizer
 from armik_moveit.scene import (
-    CLEARANCE, CONVEYOR_DROP, CONVEYOR_TOP, PART_Z, SORT_PARTS, TRANSIT,
-    build_sort_scene,
+    BIN_AREA, CLEARANCE, CONVEYOR_DROP, CONVEYOR_TOP, PART_Z, SORT_COLOURS,
+    TRANSIT, build_sort_scene,
 )
 
 
@@ -33,7 +35,9 @@ class ColorSorter(Palletizer):
         # server and the dashboard to consume.
         self.state = "starting"
         self.current = ""
-        self.counts = {c: 0 for c in SORT_PARTS}
+        self.counts = {c: 0 for c in SORT_COLOURS}
+        self.part_pos = {}      # colour -> (x, y) currently on the board
+        self.available = set()  # colours present on the board
         self.cycle_times = []
         self.t_start = time.time()
         self.alarm = False
@@ -53,6 +57,8 @@ class ColorSorter(Palletizer):
         tele = {
             "state": self.state,
             "current_color": self.current,
+            "busy": self.state == "sorting",
+            "available": sorted(self.available),
             "parts_sorted": sorted_total,
             "counts": dict(self.counts),
             "last_cycle_s": round(last_cycle, 2),
@@ -65,18 +71,39 @@ class ColorSorter(Palletizer):
 
     def setup(self):
         self._apply(build_sort_scene(clear=False))
-        for color, (x, y) in SORT_PARTS.items():
-            self.add_part(f"part_{color}", x, y, PART_Z)
         if not self.go_home():
             self.state, self.alarm, self.alarm_msg = "fault", True, "home unreachable"
             self.publish_telemetry()
             print("could not reach home; aborting")
             sys.exit(1)
         self.transit_cfg = self.ik_topdown(*TRANSIT) or HOME
+        self._random_batch()
         self.state = "idle"
         self.publish_telemetry()
         print("colour sorter ready: press RED / GREEN / BLUE "
               "(or publish red|green|blue on /target_color)")
+
+    def _random_batch(self):
+        """Spawn the three colours at random, non-overlapping spots on the bin."""
+        from armik_moveit.scene import BIN_AREA
+        xmin, xmax, ymin, ymax = BIN_AREA
+        pts = []
+        for _ in range(300):
+            if len(pts) == len(SORT_COLOURS):
+                break
+            p = (random.uniform(xmin, xmax), random.uniform(ymin, ymax))
+            if all(math.hypot(p[0] - q[0], p[1] - q[1]) > 0.09 for q in pts):
+                pts.append(p)
+        colours = list(SORT_COLOURS)
+        random.shuffle(colours)  # randomise the colour-to-spot assignment too
+        self.part_pos.clear()
+        self.available.clear()
+        for colour, (x, y) in zip(colours, pts):
+            self.part_pos[colour] = (x, y)
+            self.available.add(colour)
+            self.add_part(f"part_{colour}", x, y, PART_Z)
+        print(f"  new batch on the bin: "
+              + ", ".join(f"{c}({x:.2f},{y:.2f})" for c, (x, y) in self.part_pos.items()))
 
     def _convey_away(self, pid, place):
         """Move the placed part along the belt (+y) and off the far end."""
@@ -87,25 +114,35 @@ class ColorSorter(Palletizer):
         self._remove_world(pid)
 
     def sort(self, color):
-        if color not in SORT_PARTS:
+        if color not in SORT_COLOURS:
             self.alarm, self.alarm_msg = True, f"unknown colour '{color}'"
+            self.publish_telemetry()
             print(f"  unknown colour '{color}'")
+            return
+        if color not in self.available:
+            # the cell rejects an order for a colour that is not on the board
+            self.alarm, self.alarm_msg = True, f"no {color} object on the board"
+            self.publish_telemetry()
+            print(f"  rejected: no {color} object on the board")
             return
         self.alarm, self.alarm_msg = False, ""
         self.state, self.current = "sorting", color
         self.publish_telemetry()
-        x, y = SORT_PARTS[color]
+        x, y = self.part_pos[color]
         pid = f"part_{color}"
-        self.add_part(pid, x, y, PART_Z)  # (re)spawn at its bin spot
         drop_z = CONVEYOR_TOP + PART_SIZE / 2 + CLEARANCE
         place = (CONVEYOR_DROP[0], CONVEYOR_DROP[1], drop_z)
-        print(f"  sorting {color} -> conveyor ...")
+        print(f"  sorting {color} at ({x:.2f}, {y:.2f}) -> conveyor ...")
         t0 = time.time()
         ok = self.pick_place(pid, (x, y, PART_Z), place, self.transit_cfg)
         if ok:
             self._convey_away(pid, place)  # the belt carries the part down and off
             self.counts[color] += 1
             self.cycle_times.append(time.time() - t0)
+            self.available.discard(color)
+            self.part_pos.pop(color, None)
+            if not self.available:      # board empty -> feed a fresh random batch
+                self._random_batch()
         else:
             self.alarm, self.alarm_msg = True, f"{color} pick-place failed"
         self.state, self.current = "idle", ""
