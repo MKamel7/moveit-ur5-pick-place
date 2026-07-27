@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>armik_moveit</name>
+  <version>0.1.0</version>
+  <description>
+    ROS 2 + MoveIt 2 port of the robot-arm-ik palletizing cell (Phase 2).
+    Brings up a UR5e with ros2_control (mock hardware) and MoveIt 2 so motions
+    are planned by MoveIt/OMPL and executed on the controllers, replacing the
+    standalone MuJoCo playback for the ROS stack.
+  </description>
+  <maintainer email="mkamel860@gmail.com">Mohamed Kamel</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
+  <exec_depend>ur_robot_driver</exec_depend>
+  <exec_depend>ur_moveit_config</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
