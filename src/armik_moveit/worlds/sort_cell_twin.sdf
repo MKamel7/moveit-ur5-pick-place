@@ -1,0 +1,216 @@
+<?xml version="1.0" ?>
+<!--
+  Gazebo digital twin of the colour-sorting cell.
+
+  This world is the sim-side mirror of the running cell. The arm that moves is
+  the real UR5e on the controller (URSim over RTDE); the ur5e_gz_twin model is
+  spawned into this world and driven from that robot's /joint_states by the
+  gz_twin node, and the three coloured parts are driven from the MoveIt planning
+  scene, so the Gazebo scene always shows the cell's actual state.
+
+  It carries both cameras the demo needs:
+    - rgbd_camera: the top-down RGB-D sensor over the supply bin that feeds the
+      detector. Pose, FOV, resolution and clip planes are IDENTICAL to
+      perception_cell.sdf, because detector.py hard-codes CAM_XYZ/CAM_PITCH and
+      deprojects against them. Do not move this camera.
+    - iso_camera: a cell overview used for the demo video's Gazebo panel. Purely
+      a viewpoint; nothing depends on its pose.
+
+  Geometry is floor-referenced and matches scene.py's SORT_STRUCTURES (table top
+  at z = 0, bin top at z = 0.08, conveyor top at z = 0.14, parts are 0.04 m
+  cubes). MOUNT_H = 0.40 is the pedestal height, which lives in the twin xacro.
+-->
+<sdf version="1.10">
+  <world name="sort_cell_twin">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <!-- Lighting is deliberately identical to perception_cell.sdf: the sun and
+         nothing else. detector.py segments the parts with fixed RGB bounds
+         (red needs g < 90 and b < 90), so any extra ambient or fill light washes
+         a saturated primary towards grey and the colour stops being detected.
+         A brighter scene renders a nicer iso view and a broken detector. -->
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.95 0.95 0.95 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <direction>-0.3 0.2 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry>
+          <material><ambient>0.8 0.8 0.8 1</ambient><diffuse>0.8 0.8 0.8 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Work table: scene.py TABLE, top at z = 0.
+
+         Deliberately light (near the 0.8 ground plane of perception_cell.sdf,
+         the world detector.py was calibrated against). At scene.py's display
+         grey of 0.55 the pedestal's shadow on this surface renders around
+         (103, 103, 107), which satisfies the detector's green bound
+         (g > 100, r < 110, b < 110) even though it is pure grey: the shadow
+         became an 11,000 pixel phantom "green part" whose centroid sat out in
+         the middle of the table. Keeping the surface bright puts r well above
+         110, so no grey here can enter any of the colour boxes. -->
+    <model name="table">
+      <static>true</static>
+      <pose>0.57 0.13 -0.02 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.82 1.34 0.04</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.82 1.34 0.04</size></box></geometry>
+          <material><ambient>0.74 0.74 0.76 1</ambient><diffuse>0.74 0.74 0.76 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Supply bin: scene.py SUPPLY_BIN, top at z = 0.08 -->
+    <model name="supply_bin">
+      <static>true</static>
+      <pose>0.47 -0.32 0.04 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.26 0.24 0.08</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.26 0.24 0.08</size></box></geometry>
+          <material><ambient>0.30 0.42 0.60 1</ambient><diffuse>0.30 0.42 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Three outfeed lanes, one per colour, fanning out radially from the
+         robot (scene.py SORT_LANES). Belt tops at floor z = 0.14; they run past
+         the table edge onto the floor, which is also z = 0, so a lane reads as
+         carrying parts out of the cell. Tints are dark on purpose: the red lane
+         is inside the RGB-D camera's view and a saturated belt would be
+         segmented as a giant red part. -->
+    <!-- red outfeed lane, 0 deg from +x -->
+    <model name="conveyor_red">
+      <static>true</static>
+      <pose>0.6600 0.0000 0.0700 0 0 0.00000</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.5 0.18 0.14</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.5 0.18 0.14</size></box></geometry>
+          <material><ambient>0.24 0.08 0.08 1</ambient><diffuse>0.24 0.08 0.08 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <!-- green outfeed lane, 35 deg from +x -->
+    <model name="conveyor_green">
+      <static>true</static>
+      <pose>0.5406 0.3786 0.0700 0 0 0.61087</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.5 0.18 0.14</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.5 0.18 0.14</size></box></geometry>
+          <material><ambient>0.08 0.22 0.1 1</ambient><diffuse>0.08 0.22 0.1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <!-- blue outfeed lane, 70 deg from +x -->
+    <model name="conveyor_blue">
+      <static>true</static>
+      <pose>0.2257 0.6202 0.0700 0 0 1.22173</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.5 0.18 0.14</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.5 0.18 0.14</size></box></geometry>
+          <material><ambient>0.08 0.1 0.26 1</ambient><diffuse>0.08 0.1 0.26 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Blue is deliberately more saturated than scene.py's display colour
+         (0.10 0.30 0.85). Lit, that green channel lands right on detector.py's
+         'g < 120' bound for blue, so the part rendered as a pale blue that the
+         detector scored at 3 pixels and never reported, while red and green
+         (off-channels 0.10 / 0.15) passed with ~340. Keep blue's green low.
+         The three sorted parts. Static because their poses are driven from the
+         planning scene by gz_twin, not by physics: this is a mirror, so letting
+         Gazebo simulate them would fight the authoritative cell state. They
+         start parked below the table and are moved into view once the sorter
+         publishes a scene. -->
+    <model name="part_red">
+      <static>true</static>
+      <pose>0.41 -0.38 -1.0 0 0 0</pose>
+      <link name="link">
+        <visual name="visual"><geometry><box><size>0.04 0.04 0.04</size></box></geometry>
+          <material><ambient>0.85 0.10 0.10 1</ambient><diffuse>0.85 0.10 0.10 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="part_green">
+      <static>true</static>
+      <pose>0.47 -0.32 -1.0 0 0 0</pose>
+      <link name="link">
+        <visual name="visual"><geometry><box><size>0.04 0.04 0.04</size></box></geometry>
+          <material><ambient>0.10 0.70 0.15 1</ambient><diffuse>0.10 0.70 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="part_blue">
+      <static>true</static>
+      <pose>0.53 -0.26 -1.0 0 0 0</pose>
+      <link name="link">
+        <visual name="visual"><geometry><box><size>0.04 0.04 0.04</size></box></geometry>
+          <material><ambient>0.05 0.14 0.85 1</ambient><diffuse>0.05 0.14 0.85 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Top-down RGB-D camera over the bin. MUST match perception_cell.sdf and
+         detector.py's CAM_XYZ / CAM_PITCH / FOV. -->
+    <model name="rgbd_camera">
+      <static>true</static>
+      <pose>0.47 -0.32 1.00 0 1.5707963 0</pose>
+      <link name="link">
+        <sensor name="rgbd" type="rgbd_camera">
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <topic>rgbd_camera</topic>
+          <camera>
+            <horizontal_fov>1.2217</horizontal_fov>
+            <image><width>640</width><height>480</height><format>R8G8B8</format></image>
+            <clip><near>0.05</near><far>3.0</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+
+    <!-- Cell overview camera for the demo video. Front-right of the cell,
+         looking back at the pedestal so the bin (-y), arm and conveyor (+y) are
+         all in frame. -->
+    <model name="iso_camera">
+      <static>true</static>
+      <pose>2.60 -2.00 2.05 0 0.4622 2.3562</pose>
+      <link name="link">
+        <sensor name="iso" type="camera">
+          <update_rate>15</update_rate>
+          <always_on>true</always_on>
+          <topic>iso_camera</topic>
+          <!-- Aimed at (0.42, 0.12, 0.40), the middle of the whole cell now
+               that three outfeed lanes fan out to x 0.83 and y 0.77. Pulled
+               back and widened from the single-belt framing, which cropped the
+               blue lane. Holds the arm at full extension. -->
+          <camera>
+            <horizontal_fov>0.78</horizontal_fov>
+            <image><width>900</width><height>800</height><format>R8G8B8</format></image>
+            <clip><near>0.05</near><far>20.0</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+  </world>
+</sdf>

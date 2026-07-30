@@ -85,8 +85,25 @@ GRIPPER_LINKS = [
     "robotiq_85_left_finger_tip_link", "robotiq_85_right_finger_tip_link",
 ]
 GRIPPER_ACTION = "/robotiq_gripper_controller/gripper_cmd"
+
+# 2F-85 geometry: the driven knuckle runs from 0 rad at the full 85 mm opening to
+# GRIP_SHUT at zero opening, near enough linearly over that stroke.
+GRIP_STROKE = 0.085
+GRIP_SHUT = 0.8
+
+
+def grip_angle(width):
+    """Knuckle angle that closes the 2F-85 onto a part `width` metres across."""
+    return GRIP_SHUT * (1.0 - max(0.0, min(width, GRIP_STROKE)) / GRIP_STROKE)
+
+
 GRIP_OPEN = 0.0
-GRIP_CLOSED = 0.6
+# Close onto the workpiece rather than shutting the gripper. The old fixed 0.6
+# rad is a ~21 mm opening, well inside a 40 mm part: on real hardware that stalls
+# the fingers against the part, and in simulation (no grasp physics) the fingers
+# simply close through it, so the pads never look like they are holding anything.
+# Sizing the command to the part puts the pads on its faces.
+GRIP_CLOSED = grip_angle(PART_SIZE)
 
 GRIPPER_LEN = 0.16          # tool0 -> grasp point along the (downward) tool axis
 APPROACH_DZ = 0.15          # standoff above a pick/place before the LIN descent
@@ -115,6 +132,9 @@ class Palletizer(Node):
         self.ik = self.create_client(GetPositionIK, "/compute_ik")
         self.replans = 0
         self.speed_factor = 1.0  # scaled down by the safety layer (SSM)
+        # Part id still gripped after a cycle was aborted by a safety stop. It
+        # stays attached until release_held() is called (see pick_place).
+        self.held_after_abort = None
 
     # --- planning scene ---
     def _apply(self, scene_msg):
@@ -358,7 +378,8 @@ class Palletizer(Node):
         return picks
 
     # --- one pick and place ---
-    def pick_place(self, part_id, pick, place, transit_cfg, pick_yaw=None):
+    def pick_place(self, part_id, pick, place, transit_cfg, pick_yaw=None,
+                   hold_on_abort=None):
         px, py, pz = pick
         qx, qy, qz = place
         grasp_z = pz + GRIPPER_LEN
@@ -394,11 +415,32 @@ class Palletizer(Node):
             return True
         finally:
             if attached:
-                # failed mid-transfer: drop the held part and clear it so the
-                # next part starts from a clean gripper (no cascade)
-                self.detach_part(part_id)
-                self._remove_world(part_id)
-                self.gripper(GRIP_OPEN)
+                if hold_on_abort is not None and hold_on_abort():
+                    # A safety stop cancelled the motion mid-transfer. Keep the
+                    # part gripped: opening the gripper would drop a real
+                    # workpiece at an unplanned place, and an operator expects a
+                    # stopped cell to freeze holding whatever it had. It stays
+                    # attached, gripper closed, until release_held().
+                    self.held_after_abort = part_id
+                else:
+                    # failed mid-transfer: drop the held part and clear it so the
+                    # next part starts from a clean gripper (no cascade)
+                    self.detach_part(part_id)
+                    self._remove_world(part_id)
+                    self.gripper(GRIP_OPEN)
+
+    def release_held(self):
+        """Release a part kept in the gripper by a safety stop.
+
+        Returns the part id that was released, or None if nothing was held.
+        """
+        part_id, self.held_after_abort = self.held_after_abort, None
+        if part_id is None:
+            return None
+        self.detach_part(part_id)
+        self._remove_world(part_id)
+        self.gripper(GRIP_OPEN)
+        return part_id
 
 
 def main():
