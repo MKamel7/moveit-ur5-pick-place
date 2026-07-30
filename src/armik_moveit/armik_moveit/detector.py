@@ -7,9 +7,14 @@ world/floor frame using the known camera pose. Detected part poses are published
 on /detected_parts (geometry_msgs/PoseArray) and printed with a ground-truth
 comparison so accuracy is visible.
 
+PoseArray carries no labels, so the same detections also go out on
+/detected_parts_named as JSON keyed by colour. Anything that needs to know WHICH
+colour was seen rather than how many (the demo overlay, an HMI) reads that.
+
     ros2 launch armik_moveit perception.launch.py
     ros2 run   armik_moveit detector
 """
+import json
 import math
 
 import numpy as np
@@ -17,18 +22,38 @@ import rclpy
 from geometry_msgs.msg import Pose, PoseArray
 from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import String
 
 # Camera link pose in world (matches perception_cell.sdf): straight down.
 CAM_XYZ = np.array([0.47, -0.32, 1.00])
 CAM_PITCH = 1.5707963  # rot about y so the sensor +x looks down (-z world)
 
-# Colour thresholds in RGB (0-255): (name, R>, G, B) predicate via ranges.
-# Parts are saturated primaries, so simple RGB bounds segment them cleanly.
+# Colour thresholds in RGB (0-255). Parts are saturated primaries, so per-channel
+# bounds pick them out, but bounds alone are not enough: a grey pixel sits inside
+# every one of these boxes if it happens to land in the right brightness band. A
+# shadowed grey worktop at (105, 105, 105) satisfies "g > 100, r < 110, b < 110"
+# and reads as green. So each colour also has to be SATURATED - its channel has
+# to beat the others by a margin - which no grey can do at any brightness.
+MARGIN = {"red": 60, "green": 40, "blue": 40, "yellow": 50}
+
+
+def _dominant(hi, *lo):
+    """True where every channel in `lo` is at least MARGIN below `hi`."""
+    floor = lo[0] if len(lo) == 1 else np.maximum(*lo)
+    return hi - floor
+
+
 COLORS = {
-    "red":    lambda r, g, b: (r > 120) & (g < 90) & (b < 90),
-    "green":  lambda r, g, b: (g > 100) & (r < 110) & (b < 110),
-    "blue":   lambda r, g, b: (b > 120) & (r < 110) & (g < 120),
-    "yellow": lambda r, g, b: (r > 130) & (g > 110) & (b < 90),
+    "red":    lambda r, g, b: (r > 120) & (g < 90) & (b < 90)
+                              & (_dominant(r, g, b) > MARGIN["red"]),
+    "green":  lambda r, g, b: (g > 100) & (r < 110) & (b < 110)
+                              & (_dominant(g, r, b) > MARGIN["green"]),
+    "blue":   lambda r, g, b: (b > 120) & (r < 110) & (g < 120)
+                              & (_dominant(b, r, g) > MARGIN["blue"]),
+    # Yellow is red+green against a low blue, so the margin is measured from the
+    # weaker of the two bright channels.
+    "yellow": lambda r, g, b: (r > 130) & (g > 110) & (b < 90)
+                              & (np.minimum(r, g) - b > MARGIN["yellow"]),
 }
 GROUND_TRUTH = {  # world xy of each part (for the accuracy readout)
     "red": (0.41, -0.38), "green": (0.53, -0.38),
@@ -64,6 +89,7 @@ class Detector(Node):
         self.create_subscription(Image, "/rgbd_camera/depth_image", self._on_depth, 10)
         self.create_subscription(CameraInfo, "/rgbd_camera/camera_info", self._on_info, 10)
         self.pub = self.create_publisher(PoseArray, "/detected_parts", 10)
+        self.named = self.create_publisher(String, "/detected_parts_named", 10)
         self.create_timer(1.0, self.detect)
         self.get_logger().info("detector ready")
 
@@ -90,6 +116,7 @@ class Detector(Node):
 
         arr = PoseArray()
         arr.header.frame_id = "world"
+        found = {}
         print("--- detections (world frame) ---")
         for name, pred in COLORS.items():
             mask = pred(r, g, b)
@@ -126,7 +153,14 @@ class Detector(Node):
             pose.orientation.z = math.sin(yaw / 2)
             pose.orientation.w = math.cos(yaw / 2)
             arr.poses.append(pose)
+            found[name] = {
+                "x": float(p_world[0]), "y": float(p_world[1]), "z": float(p_world[2]),
+                "yaw_deg": round(math.degrees(yaw), 1),
+                "px": int(mask.sum()),
+            }
         self.pub.publish(arr)
+        self.named.publish(String(data=json.dumps(
+            {"colours": sorted(COLORS), "detected": found})))
 
 
 def main():

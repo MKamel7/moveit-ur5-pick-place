@@ -8,6 +8,7 @@ source of the cell geometry, the palletizing node imports from here.
     ros2 run armik_moveit populate_scene         # add the cell (default)
     ros2 run armik_moveit populate_scene --clear # remove it again
 """
+import math
 import sys
 
 import rclpy
@@ -58,19 +59,85 @@ PART_COLORS = {
     "part_blue": (0.15, 0.35, 0.85),
 }
 
-# --- colour-sorting cell: the same table + supply bin, but the place target is a
-# conveyor belt. Three colour-coded parts sit on the bin; a button picks one.
-CONVEYOR = ((0.24, 0.44, 0.14), (0.47, 0.36, 0.07), (0.16, 0.16, 0.18))
-SORT_STRUCTURES = {"table": TABLE, "supply_bin": SUPPLY_BIN, "conveyor": CONVEYOR}
+# --- colour-sorting cell -----------------------------------------------------
+# One infeed bin and THREE outfeed belts, one per colour, so a sorted part
+# actually leaves on its own lane. The lanes fan out radially from the robot
+# rather than sitting side by side: that is how a robotic divert sorter is
+# built, with the arm at the hub, each lane carrying its colour away in a
+# different direction to a different downstream station. Side by side lanes
+# would waste the arm's reach on one side and put three belts in a line where a
+# factory would have three destinations.
+#
+# All three drop points sit on an arc LANE_DROP_R from the base, comfortably
+# inside the UR5e's REACH_MAX, and the fan is placed clear of the bin (which
+# occupies roughly -34 deg).
 SORT_COLOURS = ["red", "green", "blue"]
+
+LANE_ANGLES_DEG = {"red": 0.0, "green": 35.0, "blue": 70.0}
+LANE_DROP_R = 0.62          # radius of the place point on each lane
+LANE_LEN = 0.50             # belt length, radially outward
+LANE_WIDTH = 0.18
+LANE_HEIGHT = 0.14          # top at floor z = 0.14, same as the old single belt
+LANE_CENTRE_R = 0.66        # belt centre, so the drop sits in the inner third
+# The belts run past the table edge and continue on the floor. Both surfaces
+# are at z = 0, so a lane leaving the cell reads as a belt carrying parts away
+# to a downstream station rather than a block sitting on a bench.
+# Lane tints are deliberately DARK. The red lane sits inside the RGB-D camera's
+# field of view, and detector.py segments parts by colour: a saturated belt would
+# be a very large blob passing the same test as a 40 mm part and would swamp the
+# detection. These read as red, green and blue lanes to a viewer while staying
+# well below the detector's brightness bounds (r/g/b > 120, 100, 120).
+LANE_RGB = {"red": (0.24, 0.08, 0.08),
+            "green": (0.08, 0.22, 0.10),
+            "blue": (0.08, 0.10, 0.26)}
+
+
+def lane_axis(colour):
+    """Unit vector pointing outward along a lane (the travel direction)."""
+    a = math.radians(LANE_ANGLES_DEG[colour])
+    return (math.cos(a), math.sin(a))
+
+
+def lane_drop(colour):
+    """Where the arm places this colour, in base_link x, y."""
+    ax, ay = lane_axis(colour)
+    return (LANE_DROP_R * ax, LANE_DROP_R * ay)
+
+
+def lane_end(colour):
+    """Far end of the belt, where a conveyed part leaves the cell."""
+    ax, ay = lane_axis(colour)
+    r = LANE_CENTRE_R + LANE_LEN / 2
+    return (r * ax, r * ay)
+
+
+# id -> (size, centre, rgb, yaw). Yaw turns each belt to run along its lane.
+SORT_LANES = {
+    f"conveyor_{c}": (
+        (LANE_LEN, LANE_WIDTH, LANE_HEIGHT),
+        (LANE_CENTRE_R * lane_axis(c)[0], LANE_CENTRE_R * lane_axis(c)[1],
+         LANE_HEIGHT / 2),
+        LANE_RGB[c],
+        math.radians(LANE_ANGLES_DEG[c]),
+    )
+    for c in SORT_COLOURS
+}
+
+# The sorting cell gets its own table: the three lanes reach further out and
+# further round than the palletizing layout, and TABLE is shared with the
+# palletizing cell, which must not move. Kept clear of the pedestal (which
+# occupies |x| <= 0.10, |y| <= 0.10) so the slab never collides with the base.
+SORT_TABLE = ((0.82, 1.34, 0.04), (0.57, 0.13, -0.02), (0.55, 0.55, 0.58))
+
+SORT_STRUCTURES = {"table": SORT_TABLE, "supply_bin": SUPPLY_BIN}
+SORT_STRUCTURES.update(SORT_LANES)
 SORT_PARTS = {  # legacy fixed layout (kept for reference)
     "red": (0.41, -0.38), "green": (0.47, -0.32), "blue": (0.53, -0.26),
 }
 # Random spawn region on the bin top (x_min, x_max, y_min, y_max), with a margin
 # inside the bin footprint so parts land fully on the surface.
 BIN_AREA = (0.40, 0.55, -0.41, -0.23)
-CONVEYOR_TOP = CONVEYOR[1][2] + CONVEYOR[0][2] / 2 - MOUNT_H  # base_link frame
-CONVEYOR_DROP = (0.47, 0.36)  # place x,y on the belt
+CONVEYOR_TOP = LANE_HEIGHT - MOUNT_H  # belt top, base_link frame
 
 
 def _grid(cx, cy, nx, ny, sx, sy):
@@ -87,14 +154,15 @@ TRANSIT = (0.30, 0.0, 0.52 - MOUNT_H)
 REACH_MAX = 0.82
 
 
-def _box(object_id, size, center):
+def _box(object_id, size, center, yaw=0.0):
     obj = CollisionObject()
     obj.header.frame_id = BASE_FRAME
     obj.id = object_id
     prim = SolidPrimitive(type=SolidPrimitive.BOX, dimensions=[float(s) for s in size])
     pose = Pose()
     pose.position.x, pose.position.y, pose.position.z = (float(c) for c in center)
-    pose.orientation.w = 1.0
+    pose.orientation.z = math.sin(yaw / 2.0)
+    pose.orientation.w = math.cos(yaw / 2.0)
     obj.primitives.append(prim)
     obj.primitive_poses.append(pose)
     obj.operation = CollisionObject.ADD
@@ -111,9 +179,13 @@ def _color(object_id, rgb, alpha=1.0):
 def _structures_scene(structures, clear):
     scene = PlanningScene()
     scene.is_diff = True
-    for object_id, (size, center, rgb) in structures.items():
+    for object_id, entry in structures.items():
+        # Most structures are axis aligned (size, centre, rgb); the sorting
+        # lanes carry a fourth item, the yaw that turns them along the lane.
+        size, center, rgb = entry[0], entry[1], entry[2]
+        yaw = entry[3] if len(entry) > 3 else 0.0
         cx, cy, cz = center
-        obj = _box(object_id, size, (cx, cy, cz - MOUNT_H))  # drop into base_link frame
+        obj = _box(object_id, size, (cx, cy, cz - MOUNT_H), yaw)  # into base_link
         obj.operation = CollisionObject.REMOVE if clear else CollisionObject.ADD
         scene.world.collision_objects.append(obj)
         if not clear:
