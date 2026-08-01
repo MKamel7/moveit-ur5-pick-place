@@ -7,5 +7,13 @@ extend-exclude = ["build", "install", "log"]
 select = ["E", "F", "I", "W", "UP", "B"]
 ignore = ["B008"]
 
+# dashboard.py builds an HTML page as a Python string, so its long lines are
+# embedded CSS and markup. Wrapping a CSS rule at 100 columns makes it harder to
+# read, not easier, and the limit exists for readability. The exception is
+# narrow: this one file, this one rule, and only because the content is not
+# really Python.
+[tool.ruff.lint.per-file-ignores]
+"src/armik_moveit/armik_moveit/dashboard.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["src/ur5_pick_place/test"]

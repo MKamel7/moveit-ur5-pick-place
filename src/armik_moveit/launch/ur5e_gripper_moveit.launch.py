@@ -121,16 +121,19 @@ def generate_launch_description():
             DeclareLaunchArgument("launch_rviz", default_value="true",
                                   description="Launch the MoveIt RViz GUI."),
             DeclareLaunchArgument("use_mock_hardware", default_value="true",
-                                  description="Mock hardware (true) or real UR5e + Robotiq (false)."),
+                                  description="Mock hardware (true) or real UR5e "
+                                              "+ Robotiq (false)."),
             DeclareLaunchArgument("robot_ip", default_value="0.0.0.0",
                                   description="UR5e IP address (real hardware only)."),
             DeclareLaunchArgument("use_mock_gripper", default_value="",
                                   description="Force the gripper mock (true) even with a real arm; "
                                               "empty follows use_mock_hardware."),
             DeclareLaunchArgument("headless_mode", default_value="false",
-                                  description="Real UR driver: inject the control script (URSim/headless)."),
+                                  description="Real UR driver: inject the control "
+                                              "script (URSim/headless)."),
             DeclareLaunchArgument("reverse_ip", default_value="0.0.0.0",
-                                  description="IP the robot connects back to (real driver reverse connection)."),
+                                  description="IP the robot connects back to "
+                                              "(real driver reverse connection)."),
             OpaqueFunction(function=launch_setup),
         ]
     )

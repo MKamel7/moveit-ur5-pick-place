@@ -26,14 +26,13 @@ gripper and rides it rigidly.
 import threading
 
 import rclpy
-from rclpy.node import Node
-from moveit_msgs.srv import GetPlanningScene
-from moveit_msgs.msg import PlanningScene, PlanningSceneComponents
 import tf2_ros
-
-from gz.transport13 import Node as GzNode
-from gz.msgs10.pose_v_pb2 import Pose_V
 from gz.msgs10.boolean_pb2 import Boolean
+from gz.msgs10.pose_v_pb2 import Pose_V
+from gz.transport13 import Node as GzNode
+from moveit_msgs.msg import PlanningScene, PlanningSceneComponents
+from moveit_msgs.srv import GetPlanningScene
+from rclpy.node import Node
 
 from armik_moveit.twin_world import model_name
 
@@ -104,8 +103,13 @@ def from_msg(pose):
 def moved(a, b):
     if a is None or b is None:
         return True
-    return (any(abs(x - y) > POS_EPS for x, y in zip(a[0], b[0]))
-            or any(abs(x - y) > ROT_EPS for x, y in zip(a[1], b[1])))
+    # strict=False throughout this package: it makes the zip explicit, which is
+    # what the lint asks for, and changes nothing at runtime. strict=True would
+    # raise on a length mismatch, and a ROS message such as JointState can
+    # legitimately arrive with fewer entries than expected. Tightening that is a
+    # behaviour change and belongs on the machine where this can actually be run.
+    return (any(abs(x - y) > POS_EPS for x, y in zip(a[0], b[0], strict=False))
+            or any(abs(x - y) > ROT_EPS for x, y in zip(a[1], b[1], strict=False)))
 
 
 class GzTwin(Node):
@@ -116,7 +120,7 @@ class GzTwin(Node):
         self.declare_parameter("mirror_hz", MIRROR_HZ)
         self.declare_parameter("scene_hz", SCENE_HZ)
         world = self.get_parameter("world").value
-        self.links = [l for l in self.get_parameter("links").value if l]
+        self.links = [link for link in self.get_parameter("links").value if link]
         mirror_hz = float(self.get_parameter("mirror_hz").value)
         scene_hz = float(self.get_parameter("scene_hz").value)
         self.pose_srv = f"/world/{world}/set_pose_vector"

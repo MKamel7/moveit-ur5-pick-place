@@ -41,7 +41,7 @@ class PlanExecuteSmoke(Node):
         self.client = ActionClient(self, MoveGroup, "/move_action")
 
     def _on_js(self, msg: JointState) -> None:
-        for name, pos in zip(msg.name, msg.position):
+        for name, pos in zip(msg.name, msg.position, strict=False):
             self.current[name] = pos
 
     def wait_for_state(self, timeout: float = 15.0) -> bool:
