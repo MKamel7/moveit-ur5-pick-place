@@ -21,8 +21,16 @@ from std_msgs.msg import Bool, String
 
 from armik_moveit.palletizing import HOME, PART_SIZE, Palletizer
 from armik_moveit.scene import (
-    BIN_AREA, CLEARANCE, CONVEYOR_TOP, PART_Z, SORT_COLOURS, TRANSIT,
-    build_sort_scene, lane_axis, lane_drop, lane_end,
+    BIN_AREA,
+    CLEARANCE,
+    CONVEYOR_TOP,
+    PART_Z,
+    SORT_COLOURS,
+    TRANSIT,
+    build_sort_scene,
+    lane_axis,
+    lane_drop,
+    lane_end,
 )
 
 
@@ -130,7 +138,6 @@ class ColorSorter(Palletizer):
 
     def _random_batch(self):
         """Spawn the three colours at random, non-overlapping spots on the bin."""
-        from armik_moveit.scene import BIN_AREA
         xmin, xmax, ymin, ymax = BIN_AREA
         pts = []
         for _ in range(300):
@@ -143,11 +150,11 @@ class ColorSorter(Palletizer):
         random.shuffle(colours)  # randomise the colour-to-spot assignment too
         self.part_pos.clear()
         self.available.clear()
-        for colour, (x, y) in zip(colours, pts):
+        for colour, (x, y) in zip(colours, pts, strict=False):
             self.part_pos[colour] = (x, y)
             self.available.add(colour)
             self.add_part(f"part_{colour}", x, y, PART_Z)
-        print(f"  new batch on the bin: "
+        print("  new batch on the bin: "
               + ", ".join(f"{c}({x:.2f},{y:.2f})" for c, (x, y) in self.part_pos.items()))
 
     def _convey_away(self, pid, place, colour):

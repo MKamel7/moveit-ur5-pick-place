@@ -50,8 +50,18 @@ from shape_msgs.msg import SolidPrimitive
 from std_msgs.msg import ColorRGBA
 
 from armik_moveit.scene import (
-    CLEARANCE, MOUNT_H, PALLET_TOP, PALLET_XY, PART_COLORS, PART_SIZE, PART_Z,
-    PICK_CELLS, REACH_MAX, STRUCTURES, TRANSIT, build_scene,
+    CLEARANCE,
+    MOUNT_H,
+    PALLET_TOP,
+    PALLET_XY,
+    PART_COLORS,
+    PART_SIZE,
+    PART_Z,
+    PICK_CELLS,
+    REACH_MAX,
+    STRUCTURES,
+    TRANSIT,
+    build_scene,
 )
 
 BASE = "base_link"
@@ -240,7 +250,7 @@ class Palletizer(Node):
         if res is None or res.error_code.val != SUCCESS:
             return None
         sol = dict(zip(res.solution.joint_state.name,
-                       res.solution.joint_state.position))
+                       res.solution.joint_state.position, strict=False))
         if not all(j in sol for j in ARM_JOINTS):
             return None
         return [sol[j] for j in ARM_JOINTS]
@@ -288,7 +298,7 @@ class Palletizer(Node):
             req.max_velocity_scaling_factor = vel * self.speed_factor
             req.max_acceleration_scaling_factor = vel * self.speed_factor
             c = Constraints()
-            for j, v in zip(ARM_JOINTS, config):
+            for j, v in zip(ARM_JOINTS, config, strict=False):
                 c.joint_constraints.append(JointConstraint(
                     joint_name=j, position=v, tolerance_above=0.01,
                     tolerance_below=0.01, weight=1.0))
