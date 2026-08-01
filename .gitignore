@@ -29,3 +29,9 @@ scripts/auto_resume.sh
 # generated showcase and debug captures (large / transient)
 docs/demo_showcase.html
 docs/media/scene_check.png
+
+# Artifacts from running the tests with uv locally. This package builds with
+# colcon and its CI installs with pip, so a uv lock file is one tool leaking
+# into a repository that does not use it.
+uv.lock
+.venv/
