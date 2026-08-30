@@ -153,7 +153,8 @@ def _run_trial(robot: MoveItPy, arm, gz_node, index: int, rng: random.Random, co
         # Not retried and not replaced with the fallback pose. The criterion says
         # the arm detects the object with the camera, so a miss is a failure of
         # the thing being measured.
-        return Trial(index, x, y, False, None, None, None, False, "perception", time.time() - started)
+        return Trial(index, x, y, False, None, None, None, False, "perception",
+                     time.time() - started)
 
     err_mm = math.hypot(top[0] - x, top[1] - y) * 1000.0
     ok = pick_one(robot, arm, top, f"part_{color}")
