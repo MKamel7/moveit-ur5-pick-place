@@ -160,7 +160,14 @@ aside{padding:18px 20px;overflow:auto;display:flex;flex-direction:column;gap:14p
 <script>
 let lastState="",lastParts=-1,lastSafe="";
 function log(msg,cls){const l=document.getElementById('log');const d=document.createElement('div');
- const ts=new Date().toLocaleTimeString();d.innerHTML='<span class="t">'+ts+'</span>  '+msg;
+ // Built as nodes, not markup. Every msg reaching here is assembled from
+ // /metrics, so the old innerHTML was a server-to-DOM HTML sink; it was
+ // unreachable only because current_color and the safety state happen to be
+ // enum-constrained today. That is a guarantee held somewhere else, by
+ // someone else, and this line should not depend on it.
+ const s=document.createElement('span');s.className='t';
+ s.textContent=new Date().toLocaleTimeString();
+ d.appendChild(s);d.appendChild(document.createTextNode('  '+msg));
  if(cls)d.style.color=cls;l.insertBefore(d,l.firstChild);while(l.children.length>40)l.removeChild(l.lastChild);}
 async function tick(){
  try{

@@ -22,6 +22,25 @@ Safety inputs (topics; also writable over OPC UA from a safety PLC):
 Safety output:
     /safety/state (String, JSON)  state, clear_to_run, speed_scale, reason
 
+AN INPUT NEVER HEARD FROM IS NOT A SAFE INPUT. The guard and human-presence
+signals used to be initialised to their safe-looking values, guard closed and
+nobody in the zone, so a supervisor whose safety source never came up at all
+published RUN at full speed forever and looked correct doing it. That is
+fail-open, and it is the failure a safety layer exists to not have: the
+dangerous case is exactly the one where the safety bus is dead. Both inputs now
+start UNKNOWN and unknown is treated as unsafe, so the cell holds a protective
+stop until a source affirmatively says it is clear.
+
+WHAT IS DELIBERATELY NOT HERE, and why. There is no staleness timeout on the
+guard and human inputs, only on joint feedback. A timeout needs the source to
+publish cyclically, and these publish ON CHANGE (`opcua_server.py:160`, which
+does that specifically so it does not fight the GUI as a second publisher). A
+timeout against on-change publishers would trip on a healthy, unchanging cell.
+Making it real means one cyclic safety source with a heartbeat, the way a
+PROFIsafe or FSoE F-host works, which is a design change and not this fix. The
+gap is named here rather than closed badly: a watchdog that false-trips gets
+switched off, and then there is no watchdog.
+
     ros2 run armik_moveit safety_supervisor
 """
 import json
@@ -33,19 +52,38 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 
-REDUCED_SPEED = 0.3   # ISO/TS 15066 speed-and-separation reduced speed factor
+from armik_moveit.safety_logic import (
+    REDUCED_SPEED,
+    STOPPED_STATES,
+    SafetyInputs,
+    decide,
+    reset_clears_latches,
+    watchdog_expired,
+)
+
+_ = REDUCED_SPEED  # re-exported for callers that imported it from here
 JOINT_TIMEOUT = 1.5   # s without joint feedback -> watchdog fault
+# Grace after start before feedback that has NEVER arrived counts as lost. The
+# supervisor is routinely started before move_group, so a 1.5 s bound would
+# latch a fault on every ordinary bringup and teach an operator to reset it
+# reflexively, which is worse than the fault it reports. Long enough to cover a
+# normal start, short enough that a robot which never reports is not silently
+# tolerated for the whole run.
+STARTUP_GRACE = 10.0
 
 
 class SafetySupervisor(Node):
     def __init__(self):
         super().__init__("safety_supervisor")
         self.estop = False
-        self.guard_closed = True
-        self.human_present = False
+        # None means no source has spoken yet. Unknown is unsafe: the guard is
+        # not assumed shut and the zone is not assumed empty.
+        self.guard_closed: bool | None = None
+        self.human_present: bool | None = None
         self.estop_latched = False
         self.fault_latched = False
         self.last_joint = 0.0
+        self.started = time.time()
         self.state = "INIT"
         self.reason = "initialising"
 
@@ -72,7 +110,7 @@ class SafetySupervisor(Node):
         self.human_present = m.data
 
     def _reset(self, m):
-        if m.data and not self.estop:
+        if reset_clears_latches(m.data, self.estop):
             self.estop_latched = False
             self.fault_latched = False
 
@@ -85,25 +123,26 @@ class SafetySupervisor(Node):
             self._cancel.call_async(CancelGoal.Request())
 
     def tick(self):
-        # watchdog: joint feedback must be fresh once it has started
-        if self.last_joint and (time.time() - self.last_joint) > JOINT_TIMEOUT:
+        # Watchdog. `if self.last_joint and ...` meant feedback that never
+        # arrived at all was never late, so a robot that reported nothing from
+        # the start was indistinguishable from a healthy one. Feedback that has
+        # never come is now measured from node start instead, past a grace.
+        if watchdog_expired(time.time(), self.last_joint, self.started,
+                            JOINT_TIMEOUT, STARTUP_GRACE):
             self.fault_latched = True
 
         prev = self.state
-        if self.estop_latched:
-            self.state, self.reason = "ESTOP", "emergency stop"
-        elif self.fault_latched:
-            self.state, self.reason = "FAULT", "robot feedback lost"
-        elif not self.guard_closed:
-            self.state, self.reason = "GUARD_STOP", "guard open"
-        elif self.human_present:
-            self.state, self.reason = "REDUCED", "human in zone (SSM)"
-        else:
-            self.state, self.reason = "RUN", "ok"
+        decision = decide(SafetyInputs(
+            estop_latched=self.estop_latched,
+            fault_latched=self.fault_latched,
+            guard_closed=self.guard_closed,
+            human_present=self.human_present,
+        ))
+        self.state, self.reason = decision.state, decision.reason
 
-        stopped = self.state in ("ESTOP", "FAULT", "GUARD_STOP")
-        clear = self.state in ("RUN", "REDUCED")
-        speed = REDUCED_SPEED if self.state == "REDUCED" else (1.0 if clear else 0.0)
+        stopped = self.state in STOPPED_STATES
+        clear = decision.clear_to_run
+        speed = decision.speed_scale
 
         # on any transition from a running state into a stop, cancel motion now
         if stopped and prev in ("RUN", "REDUCED", "INIT"):

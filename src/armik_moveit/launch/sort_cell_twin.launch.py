@@ -80,6 +80,16 @@ def launch_setup(context, *args, **kwargs):
 
     detector = Node(package="armik_moveit", executable="detector", output="screen")
 
+    # The supervisor is cell infrastructure, not an optional extra, and it was
+    # started by hand or not at all: no launch file anywhere referenced it, and
+    # nothing reported its absence. A safety layer an operator can forget to
+    # start is not a safety layer (docs/safety_fmea.md, row 5.2). It also has to
+    # be running for the cell to move now that color_sort fails safe on a
+    # missing safety message rather than assuming full speed.
+    safety = Node(
+        package="armik_moveit", executable="safety_supervisor", output="screen"
+    )
+
     twin = Node(
         package="armik_moveit",
         executable="gz_twin",
@@ -104,6 +114,10 @@ def launch_setup(context, *args, **kwargs):
         gz_server,
         TimerAction(period=6.0, actions=[bridge]),
         TimerAction(period=9.0, actions=[detector, twin]),
+        # Started with the rest of the cell rather than waited on: it holds a
+        # protective stop until its inputs report, so bringing it up early only
+        # means the stop is in force from the beginning, which is the point.
+        safety,
     ] + extra
 
 

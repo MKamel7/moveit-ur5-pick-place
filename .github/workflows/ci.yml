@@ -27,6 +27,11 @@ jobs:
       # anonymous OPC UA access is reintroduced or a password is committed.
       - name: OPC UA access control
         run: python -m pytest src/armik_moveit/test/test_opcua_security.py -v
+      # The safe-state rules, extracted out of the rclpy Node so they can be
+      # reached without a robot. Runs here rather than in the colcon job so a
+      # broken safety rule fails in seconds instead of after a container build.
+      - name: Safety supervisor logic
+        run: python -m pytest src/armik_moveit/test/test_safety_logic.py -v
 
   colcon-build:
     # Builds the ament package and runs its tests inside a ROS 2 Jazzy container

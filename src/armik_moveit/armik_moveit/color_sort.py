@@ -50,11 +50,15 @@ class ColorSorter(Palletizer):
         self.t_start = time.time()
         self.alarm = False
         self.alarm_msg = ""
-        # safety state, driven by the safety_supervisor
-        self.safe = True
-        self.safety_state = "RUN"
-        self.safety_reason = "ok"
-        self.speed_scale = 1.0
+        # Safety state, driven by the safety_supervisor. Starts STOPPED, not
+        # RUN: before the supervisor has said anything this node knows nothing
+        # about the cell, and "no information" was previously initialised to
+        # "clear to run at full speed", so a cell with no supervisor at all
+        # sorted parts believing it had been cleared.
+        self.safe = False
+        self.safety_state = "INIT"
+        self.safety_reason = "waiting for the safety supervisor"
+        self.speed_scale = 0.0
         # A part gripped through a safety stop is released by the operator's
         # RESET / ON, which is what publishes /safety/reset.
         self.release_pending = False
@@ -87,14 +91,27 @@ class ColorSorter(Palletizer):
         print(f"  reset: released {part_id} from the gripper")
 
     def _on_safety(self, msg):
+        """Read the supervisor's verdict, defaulting to the unsafe answer.
+
+        These used to default to `clear_to_run=True` and `speed_scale=1.0`, so
+        a safety message missing either field read as "cell clear, full speed",
+        and a message that would not parse was dropped with no record while the
+        previous verdict stayed in force indefinitely. That is the same
+        fail-open pattern the supervisor's own inputs had: the absent value was
+        filled in with the permissive one. A missing verdict is not a permit.
+        """
         try:
             s = json.loads(msg.data)
         except json.JSONDecodeError:
+            self.safe = False
+            self.speed_scale = 0.0
+            self.safety_state, self.safety_reason = "FAULT", "unparseable safety message"
+            self.get_logger().warn("safety message did not parse; holding a stop")
             return
-        self.safe = bool(s.get("clear_to_run", True))
+        self.safe = bool(s.get("clear_to_run", False))
         self.safety_state = s.get("state", "?")
         self.safety_reason = s.get("reason", "")
-        self.speed_scale = float(s.get("speed_scale", 1.0))
+        self.speed_scale = float(s.get("speed_scale", 0.0))
 
     def publish_telemetry(self):
         sorted_total = sum(self.counts.values())
