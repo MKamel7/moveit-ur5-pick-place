@@ -1,0 +1,36 @@
+# Execute a planned pick and place, reporting the stage it reached.
+#
+# The stage matters more than the boolean. A cycle that fails on the descent is
+# a reachability problem, one that fails on the retreat has already moved the
+# part and left the cell in a different state than it started in, and one
+# vetoed by the safety supervisor is not a robot fault at all. Recovering from
+# those needs different things, and a bare False tells an operator none of it.
+#
+# SAFETY_VETO is deliberately a first-class outcome rather than an error. A
+# supervisor stopping a cell is the system working, and logging it as a motion
+# failure trains whoever reads the logs to ignore the safety layer.
+string part_name                   # gazebo model to carry, e.g. part_green
+moveit_msgs/RobotTrajectory approach
+geometry_msgs/PoseStamped place_pose
+---
+bool success
+uint8 STAGE_NONE=0
+uint8 STAGE_APPROACH=1
+uint8 STAGE_DESCEND=2
+uint8 STAGE_GRASP=3
+uint8 STAGE_LIFT=4
+uint8 STAGE_TRANSFER=5
+uint8 STAGE_RELEASE=6
+uint8 STAGE_RETREAT=7
+uint8 STAGE_COMPLETE=8
+uint8 reached_stage
+uint8 NONE=0
+uint8 EXECUTION_FAILED=1
+uint8 SAFETY_VETO=2                # the supervisor stopped it; not a fault
+uint8 CONTROLLER_UNAVAILABLE=3
+uint8 failure
+string message
+float64 cycle_time_s
+---
+uint8 stage
+float64 elapsed_s

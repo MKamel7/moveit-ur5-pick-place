@@ -1,0 +1,26 @@
+# Ask perception for one object's pose, and get an answer that says what happened.
+#
+# This replaces waiting on /detected/<colour> and inferring the outcome from
+# whether a message turned up. A topic that stays silent cannot distinguish
+# "the camera sees nothing", "the detector died", "nobody launched it" and
+# "the pose is stale from three minutes ago", and every one of those was read
+# as the same timeout. The result below has to say which.
+string color                    # red, green or blue
+float64 timeout_s 8.0           # 0 means use the server default
+---
+bool success
+geometry_msgs/PoseStamped pose  # only meaningful when success is true
+# Why it failed, when it did. NO_DETECTION is the honest negative: perception
+# ran and saw nothing. The others are faults in the pipeline, not observations
+# about the scene, and reporting them as an empty scene is how a broken camera
+# reads as an empty table.
+uint8 NONE=0
+uint8 NO_DETECTION=1            # perception answered, nothing there
+uint8 PERCEPTION_UNAVAILABLE=2  # nobody is publishing at all
+uint8 STALE=3                   # a pose arrived but is older than max_age_s
+uint8 INVALID_COLOR=4
+uint8 failure
+string message
+float64 age_s                   # age of the pose used, so staleness is visible
+---
+float64 elapsed_s

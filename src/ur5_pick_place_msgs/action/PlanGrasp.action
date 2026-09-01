@@ -1,0 +1,25 @@
+# Plan the approach to a grasp, without executing it.
+#
+# Splitting planning from execution is the point. Today a failure anywhere in
+# pick_one comes back as one boolean, so "no IK solution at that pose", "the
+# planner could not find a path" and "the arm was already in collision before
+# it started" are indistinguishable, and the placement benchmark records all
+# three as failed_stage="motion". A cell that cannot say which of those it hit
+# cannot be diagnosed from its logs, and the fix for each is different.
+geometry_msgs/PoseStamped target   # object top, base_link frame
+float64 approach_height 0.12       # metres above the target for the pre-grasp
+bool front_constraint true         # keep the elbow out of the camera view
+---
+bool success
+moveit_msgs/RobotTrajectory trajectory
+uint8 NONE=0
+uint8 NO_IK_SOLUTION=1             # the pose is unreachable
+uint8 START_STATE_IN_COLLISION=2   # the arm is already touching something
+uint8 NO_PLAN_FOUND=3              # reachable, but no collision-free path
+uint8 TARGET_OUT_OF_WORKSPACE=4
+uint8 failure
+string message
+float64 planning_time_s
+---
+float64 elapsed_s
+uint8 attempt
