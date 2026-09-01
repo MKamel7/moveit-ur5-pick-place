@@ -80,6 +80,13 @@ MARGIN = 0.06
 X_MIN, X_MAX = 0.35 + MARGIN, 0.75 - MARGIN
 Y_MIN, Y_MAX = -0.125 + MARGIN, 0.425 - MARGIN
 
+# The table top itself, which is the loosest true statement about where a
+# sampled part can legitimately be. Used to reject a trial whose placement never
+# took: a part perceived off the table was not presented at the pose the CSV is
+# about to record, whatever the arm then did with it.
+TABLE_X_MIN, TABLE_X_MAX = 0.35, 0.75
+TABLE_Y_MIN, TABLE_Y_MAX = -0.125, 0.425
+
 # Table top 0.20 + half the 50 mm cube.
 PART_CENTRE_Z = 0.20 + OBJECT_SIZE[2] / 2.0
 
@@ -122,20 +129,62 @@ def _gz_set_pose(gz_node, name: str, x: float, y: float, z: float) -> bool:
     req.position.z = float(z)
     req.orientation.w = 1.0
     try:
-        # Argument order and types mirror part_animator._set_pose exactly. The
-        # return shape of gz request() is not relied on, because part_animator
-        # ignores it too and this is not the place to discover it differs.
-        gz_node.request(f"/world/{WORLD_NAME}/set_pose", req, GzPose, Boolean, 200)
-        return True
+        # The result IS relied on. It used to be discarded, on the reasoning
+        # that part_animator ignores it too, and that turned a dead simulator
+        # into a clean run: with the Gazebo server gone the service answered
+        # nothing, every placement was reported accepted, and the benchmark
+        # wrote a CSV claiming 3/3 detections and a 126 mm "perception error"
+        # that was really the distance from a random sample to the part's
+        # unmoved home pose. A benchmark that cannot tell a stopped simulation
+        # from a successful placement is measuring its own sampler.
+        result = gz_node.request(f"/world/{WORLD_NAME}/set_pose", req, GzPose, Boolean, 200)
     except Exception as exc:  # noqa: BLE001
-        logger.warn(f"set_pose failed for {name}: {exc}")
+        logger.warn(f"set_pose raised for {name}: {exc}")
         return False
+
+    # gz request() answers (ok, reply); on a failed call the reply is absent.
+    accepted = bool(result[0]) if isinstance(result, tuple) else bool(result)
+    if not accepted:
+        logger.warn(f"set_pose refused for {name}: is the Gazebo server running?")
+    return accepted
+
+
+def _reset_animator() -> None:
+    """Clear part_animator's belt state before a placement is commanded.
+
+    WHY THIS IS NOT OPTIONAL. part_animator keeps every released part in an
+    ``on_belt`` dict and re-poses each one at 30 Hz, so a part put back on the
+    table by ``set_pose`` is dragged onto the conveyor within a frame. The
+    benchmark already builds a ``/carry_cmd`` publisher for pick_one and simply
+    never used the ``reset`` op the animator provides for exactly this.
+
+    The cost of leaving it out was not a failed run, which is why it survived:
+    a three-trial run scored 3/3 SUCCESS while only the first trial presented
+    the placement it recorded. Trials 2 and 3 were perceived at x 0.5007 and
+    0.4847, which is BELT_X, with negative y, which is off the table. The arm
+    really did pick the part and really did place it, so every stage reported
+    success; it was picking from the conveyor at a near-fixed pose while the
+    CSV recorded a random table pose. That is a 100% success rate for a
+    randomised-placement criterion measured without randomised placements.
+    """
+    from std_msgs.msg import String
+
+    import ur5_pick_place.pick_place_node as ppn
+
+    msg = String()
+    msg.data = "reset"
+    ppn._carry_pub.publish(msg)
 
 
 def _run_trial(robot: MoveItPy, arm, gz_node, index: int, rng: random.Random, color: str) -> Trial:
     started = time.time()
     x = rng.uniform(X_MIN, X_MAX)
     y = rng.uniform(Y_MIN, Y_MAX)
+
+    # Drop any belt state from the previous trial before touching poses, or the
+    # animator will overwrite the placement this trial is about to command.
+    _reset_animator()
+    time.sleep(0.3)
 
     # Park every part, then place only the sampled one. Parking first means a
     # trial cannot inherit the previous trial's leftover position.
@@ -156,6 +205,25 @@ def _run_trial(robot: MoveItPy, arm, gz_node, index: int, rng: random.Random, co
         return Trial(index, x, y, False, None, None, None, False, "perception",
                      time.time() - started)
 
+    # A trial whose placement did not take must not be scored, in either
+    # direction. The belt regression scored as SUCCESS because every stage
+    # genuinely worked on a part that was not where the row says it was, and a
+    # 300 mm miss on a 50 mm cube lying on a table is not a perception result,
+    # it is a part somewhere else. Recording it as a failure is the conservative
+    # reading and the one that cannot flatter the success rate.
+    #
+    # HONEST LIMIT: this asks perception where the part is, and perception is
+    # part of what is under test, so a genuinely broken detector would be
+    # attributed here rather than to itself. That is the wrong label but the
+    # right verdict, and it fails loudly instead of passing quietly.
+    if not (TABLE_X_MIN <= top[0] <= TABLE_X_MAX and TABLE_Y_MIN <= top[1] <= TABLE_Y_MAX):
+        logger.warn(
+            f"trial {index}: part perceived at ({top[0]:.3f}, {top[1]:.3f}), off the table; "
+            f"the placement did not take"
+        )
+        return Trial(index, x, y, True, round(top[0], 4), round(top[1], 4), None, False,
+                     "placement", time.time() - started)
+
     err_mm = math.hypot(top[0] - x, top[1] - y) * 1000.0
     ok = pick_one(robot, arm, top, f"part_{color}")
     _go_to_named(robot, arm, READY_STATE, "home")
@@ -172,6 +240,20 @@ def _run_trial(robot: MoveItPy, arm, gz_node, index: int, rng: random.Random, co
         failed_stage="" if ok else "motion",
         seconds=round(time.time() - started, 2),
     )
+
+
+def _write_csv(trials: list[Trial], csv_path: Path) -> None:
+    """Rewrite the whole CSV from the trials so far.
+
+    Rewritten rather than appended so the file is always complete and always
+    has its header, whatever killed the previous run. At 100 to 500 rows the
+    cost is irrelevant next to a 40 s trial.
+    """
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(asdict(trials[0]).keys()))
+        writer.writeheader()
+        writer.writerows(asdict(t) for t in trials)
 
 
 def _summarise(trials: list[Trial], csv_path: Path) -> None:
@@ -192,7 +274,7 @@ def _summarise(trials: list[Trial], csv_path: Path) -> None:
             f"perception error  median {errs_sorted[len(errs) // 2]:.1f} mm, "
             f"worst {max(errs):.1f} mm, n={len(errs)}"
         )
-    for stage in ("set_pose", "perception", "motion"):
+    for stage in ("set_pose", "perception", "placement", "motion"):
         count = sum(t.failed_stage == stage for t in trials)
         if count:
             logger.info(f"failed at {stage:<10} {count}")
@@ -240,19 +322,25 @@ def main() -> None:
         for i in range(1, trials_n + 1):
             t = _run_trial(robot, arm, gz_node, i, rng, color)
             results.append(t)
+            # Written now, not at the end. The `finally` below cannot be relied
+            # on: this node spends nearly all its time blocked inside MoveIt's
+            # C++ execution, where a SIGINT is not delivered until control
+            # returns to the interpreter. A campaign that hung on trial 31 of
+            # 100 refused SIGINT for the 10 s launch allows, was SIGKILLed, and
+            # lost all 30 completed trials, which is exactly what the comment
+            # on the `finally` block promised would not happen. Flushing per
+            # trial costs one file write per 40 s and bounds the loss at one row.
+            _write_csv(results, csv_path)
             logger.info(
                 f"trial {i}/{trials_n}: {'ok' if t.success else 'FAIL ' + t.failed_stage} "
                 f"at ({t.commanded_x:.3f}, {t.commanded_y:.3f}) in {t.seconds:.1f}s"
             )
     finally:
-        # Write whatever ran. A benchmark interrupted at trial 13 of 20 still has
-        # 13 results worth keeping, and losing them to a tidy exit is a bad trade.
+        # A last write and the summary. The CSV is already current from the
+        # per-trial flush above, so this is belt and braces rather than the
+        # only chance to keep the data, which is what it used to be.
         if results:
-            csv_path.parent.mkdir(parents=True, exist_ok=True)
-            with csv_path.open("w", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=list(asdict(results[0]).keys()))
-                writer.writeheader()
-                writer.writerows(asdict(t) for t in results)
+            _write_csv(results, csv_path)
             _summarise(results, csv_path)
         try:
             time.sleep(1.0)

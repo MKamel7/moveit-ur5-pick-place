@@ -20,6 +20,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     target_color = LaunchConfiguration("target_color")
+    gazebo_gui = LaunchConfiguration("gazebo_gui")
     pkg = get_package_share_directory("ur5_pick_place")
     world_file = os.path.join(pkg, "worlds", "pick_place.sdf")
     ur_sim = get_package_share_directory("ur_simulation_gz")
@@ -33,6 +34,15 @@ def generate_launch_description():
             "safety_limits": "true",
             "launch_rviz": "false",
             "world_file": world_file,
+            # Forwarded because the default is "true", and with a GUI
+            # ur_sim_control runs `gz sim -r <world>` rather than `-s -r`. That
+            # is the mode where the server waits for a GUI to hand it the world,
+            # and on a box where the Gazebo GUI cannot come up it takes a SIGINT
+            # while the world is still loading. The server then exits before it
+            # ever advertises /world/pick_place/set_pose, so part_animator and
+            # the placement benchmark drive a simulation that is not running,
+            # and nothing in either of them says so. Headless needs this false.
+            "gazebo_gui": gazebo_gui,
         }.items(),
     )
 
@@ -88,6 +98,12 @@ def generate_launch_description():
                 default_value="green",
                 choices=["red", "green", "blue"],
                 description="Which coloured part the arm should pick and place on the belt.",
+            ),
+            DeclareLaunchArgument(
+                "gazebo_gui",
+                default_value="true",
+                choices=["true", "false"],
+                description="Start Gazebo with its GUI. Set false for headless runs and CI.",
             ),
             ur_control,
             ur_moveit,
