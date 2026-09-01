@@ -17,9 +17,17 @@ import json
 import threading
 
 import rclpy
-from asyncua import Server
+from asyncua import Server, ua
+from asyncua.server.user_managers import User, UserManager, UserRole
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
+
+from armik_moveit.opcua_security import (
+    PASSWORD_WAS_GENERATED,
+    Credentials,
+    authenticate,
+    certificate_paths,
+)
 
 ENDPOINT = "opc.tcp://0.0.0.0:4840/cell/"
 NS_URI = "http://mkamel.robotcell"
@@ -60,10 +68,37 @@ class Bridge(Node):
 
 
 async def run_server(bridge):
-    server = Server()
+    account = Credentials()
+
+    class OnlyTheSupervisor(UserManager):
+        def get_user(self, iserver, username=None, password=None,
+                     certificate=None):
+            if authenticate(username, password, account):
+                return User(role=UserRole.User)
+            return None         # anonymous and everyone else
+
+    # ANONYMOUS IS REFUSED. The Safety object below is writable, so an
+    # unauthenticated client reaching it could assert EStop, clear a guard or
+    # fake HumanPresent on a live cell. See armik_moveit/opcua_security.py.
+    server = Server(user_manager=OnlyTheSupervisor())
     await server.init()
     server.set_endpoint(ENDPOINT)
     server.set_server_name("Colour Sorting Cell")
+    # Anonymous is not in this list, so it is not offered at all.
+    server.set_identity_tokens([ua.UserNameIdentityToken])
+
+    certificate, key = certificate_paths()
+    if certificate and key:
+        await server.load_certificate(certificate)
+        await server.load_private_key(key)
+        server.set_security_policy(
+            [ua.SecurityPolicyType.Basic256Sha256_SignAndEncrypt])
+        channel = "signed and encrypted"
+    else:
+        # Still authenticated, but the channel is plaintext. Say so loudly
+        # rather than letting it look like the secure case.
+        channel = ("PLAINTEXT (set CELL_OPCUA_CERT and CELL_OPCUA_KEY to a "
+                   "keypair for Basic256Sha256 sign and encrypt)")
     idx = await server.register_namespace(NS_URI)
 
     cell = await server.nodes.objects.add_object(idx, "CellController")
@@ -95,6 +130,13 @@ async def run_server(bridge):
 
     async with server:
         print(f"OPC UA server up at {ENDPOINT}")
+        print(f"  channel  {channel}")
+        print(f"  user     {account.username}")
+        if PASSWORD_WAS_GENERATED:
+            print(f"  password {account.password}   (generated for this run; "
+                  f"set CELL_OPCUA_PASSWORD to choose one)")
+        else:
+            print("  password from CELL_OPCUA_PASSWORD")
         print("  write CellController/TargetColour = red|green|blue to command a sort")
         while rclpy.ok():
             t = bridge.latest

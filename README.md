@@ -180,9 +180,34 @@ software and RTDE interface as a physical UR5e. This is not sim to real:
 - A randomised multi-trial success-rate evaluation is not automated, so no
   aggregate success rate is quoted here.
 
+<<<<<<< Updated upstream
 Further documentation: `ros2_docs/SAFETY.md` for the functional-safety layer,
 `ros2_docs/HARDWARE.md` for running against a real arm, and
 `ros2_docs/DEMO_VIDEO.md` for how the four-panel video is captured and rendered.
+=======
+## Roadmap
+
+**Safety first, and these are open bugs rather than features:**
+
+- **Close the fail-open safety inputs.** `safety_supervisor.py` defaults `guard_closed=True` and `human_present=False` with no staleness check, and line 88 reads `if self.last_joint and ...` with `last_joint` initialised to `0.0`, so **the watchdog is disabled until the first JointState ever arrives**. A supervisor started against a dead safety bus publishes RUN at full speed.
+- **Test the supervisor at all.** Its latching and reset interlock are correct and nothing protects either.
+- **Lint `tools/`.** CI runs `ruff check src/`, so it is excluded by omission rather than by rule.
+
+**Then:**
+
+- **Build and run a statistical grasp campaign** — 100 to 500 randomised trials over position, yaw, RGB-D noise, lighting and occlusion, reporting detection success, position error at p50 and p95, grasp success and end-to-end cycle success. The README currently declines to quote an aggregate success rate, which is honest and worth replacing with a measured one.
+- **Real RGB-D before real robot** — a RealSense or ZED with AprilTag extrinsic calibration, still driving URSim. Genuine perception noise and calibration error with no hardware risk.
+- **Typed interfaces instead of implicit state** — `DetectObject`, `PlanGrasp`, `ExecutePick` as actions rather than topic availability as a state machine, then MoveIt Task Constructor for an explicit task graph.
+- **An FMEA table for the supervisor** — four safety inputs, each with its failure modes, detection mechanism and the test that proves it.
+
+## One-line summary for a CV
+
+Built a vision-guided UR5e pick-and-place in ROS 2 Jazzy and MoveIt 2: an RGB-D
+camera and classical colour segmentation localise a selected part to a 3D grasp
+pose (1-2 mm accuracy in sim), then OMPL plans a collision-aware, obstacle-avoiding
+top-down grasp that places it on a conveyor, with a unit-tested perception core
+and CI.
+>>>>>>> Stashed changes
 
 ## License
 

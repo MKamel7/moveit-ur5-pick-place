@@ -23,6 +23,10 @@ jobs:
         run: ruff check src/
       - name: Run unit tests
         run: PYTHONPATH=src/ur5_pick_place python -m pytest src/ur5_pick_place/test -v
+      # Needs no ROS and no asyncua, so it runs in the fast gate. It fails if
+      # anonymous OPC UA access is reintroduced or a password is committed.
+      - name: OPC UA access control
+        run: python -m pytest src/armik_moveit/test/test_opcua_security.py -v
 
   colcon-build:
     # Builds the ament package and runs its tests inside a ROS 2 Jazzy container
