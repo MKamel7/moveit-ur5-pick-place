@@ -52,6 +52,14 @@ class PartAnimator(Node):
         self.carried: str | None = None
         self.on_belt: dict[str, float] = {}  # part -> current y
         self.create_subscription(String, "/carry_cmd", self.on_cmd, 10)
+        # Acknowledgement, not decoration. The placement benchmark has to know
+        # that a reset's three set_pose writes have LANDED before it commands a
+        # placement, and it cannot infer that from the poses: on a fresh
+        # simulation the parts are already at their homes, so "wait until they
+        # are home" passes instantly and proves nothing. That inference put the
+        # reset's writes on top of the next placement and failed trial 1 of a
+        # campaign with "part_red did not park".
+        self.ack = self.create_publisher(String, "/carry_ack", 10)
         self.create_timer(TICK, self.tick)
         self.get_logger().info("part_animator ready")
 
@@ -75,6 +83,9 @@ class PartAnimator(Node):
                 self.on_belt.clear()
             for name, home in PART_HOMES.items():
                 self._set_pose(name, *home)
+            ack = String()
+            ack.data = "reset"
+            self.ack.publish(ack)
             self.get_logger().info("parts reset to the table")
             return
         if not part:

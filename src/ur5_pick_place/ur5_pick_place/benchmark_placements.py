@@ -45,6 +45,7 @@ import csv
 import math
 import os
 import random
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -53,20 +54,28 @@ import rclpy
 from moveit.planning import MoveItPy
 from rclpy.logging import get_logger
 
+from ur5_pick_place.part_animator import PART_HOMES
 from ur5_pick_place.pick_place_node import (
+    OBJECT_ID,
     OBJECT_SIZE,
     PLANNING_GROUP,
     READY_STATE,
     _apply_front_constraint,
     _build_static_scene,
     _go_to_named,
+    _set_attached,
     get_perceived_top,
     pick_one,
+    remove_object,
+)
+from ur5_pick_place.placement_guard import (
+    WORLD_NAME,
+    AnimatorAck,
+    GroundTruth,
+    wait_until_at,
 )
 
 logger = get_logger("benchmark_placements")
-
-WORLD_NAME = "pick_place"
 
 # Sampling window on the table top, in base_link metres.
 #
@@ -92,6 +101,12 @@ PART_CENTRE_Z = 0.20 + OBJECT_SIZE[2] / 2.0
 
 # Where the two unused parts are parked so they cannot occlude the camera view
 # of the sampled one or block a plan. Off the table, on the floor, out of reach.
+# Parking drops a part onto the floor from table height, so it can bounce and
+# slide a few centimetres before it settles. The check below only has to
+# establish that the part LEFT the workspace, not where it came to rest, and the
+# parking spots are 0.5 m or more from the table.
+PARK_TOL_M = 0.05
+
 PARKED = {
     "red": (0.05, -0.75, 0.03),
     "green": (0.05, -0.85, 0.03),
@@ -99,6 +114,78 @@ PARKED = {
 }
 
 PERCEPTION_TIMEOUT_S = 8.0
+
+# How long one trial's motion is allowed to take before it is abandoned.
+#
+# WHY A CAMPAIGN NEEDS A CEILING AND NOT JUST A CSV FLUSH
+#
+# On 2026-09-01 a 100-trial run stopped at trial 53 and sat there for 8.7 hours.
+# Sim time kept advancing at about half real time, the process was alive, and
+# the arm never moved again: the controller logged "Accepted new action goal"
+# and never logged a result, and MoveIt waits for that result with no deadline
+# of its own, because ur_moveit_config ships
+# `execution_duration_monitoring: false` with the note that the scaled joint
+# trajectory controller would otherwise see goals aborted unexpectedly.
+#
+# The module already knew this could happen. The docstring records an earlier
+# campaign that hung on trial 31 of 100, and the fix taken then was to flush the
+# CSV every trial so a kill loses one row. That bounds the DATA loss and does
+# nothing about the TIME loss, which is the more expensive of the two when the
+# run is unattended overnight.
+#
+# 420 s is deliberately far above the worst honest trial measured so far, 309 s,
+# so a slow constrained-sampling trial is not relabelled as a hang.
+TRIAL_TIMEOUT_S = 420.0
+
+# If cancelling execution does not return control either, the process itself is
+# wedged and no further trial can be trusted. Every completed row is already on
+# disk, so leaving is strictly better than sitting.
+HARD_TIMEOUT_S = 540.0
+
+
+class MotionWatchdog:
+    """Bounds one trial's motion, and says so afterwards.
+
+    A trial that runs out of time is recorded as `timeout`, never as `motion`.
+    They are different findings: one is the cell failing to execute a reachable
+    grasp, the other is the run failing to come back, and collapsing them would
+    put harness faults into the success rate.
+    """
+
+    def __init__(self, robot: MoveItPy, index: int) -> None:
+        self._robot = robot
+        self._index = index
+        self._done = threading.Event()
+        self.fired = False
+
+    def __enter__(self) -> MotionWatchdog:
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._done.set()
+
+    def _watch(self) -> None:
+        if self._done.wait(TRIAL_TIMEOUT_S):
+            return
+        self.fired = True
+        logger.error(
+            f"trial {self._index}: no result after {TRIAL_TIMEOUT_S:.0f} s, "
+            f"stopping execution"
+        )
+        try:
+            self._robot.get_trajectory_execution_manager().stop_execution()
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"stop_execution raised: {exc}")
+
+        if self._done.wait(HARD_TIMEOUT_S - TRIAL_TIMEOUT_S):
+            return
+        logger.error(
+            f"trial {self._index}: still blocked {HARD_TIMEOUT_S:.0f} s in. The CSV "
+            f"holds every completed trial; leaving rather than hanging."
+        )
+        os._exit(3)
 
 
 @dataclass
@@ -176,23 +263,93 @@ def _reset_animator() -> None:
     ppn._carry_pub.publish(msg)
 
 
-def _run_trial(robot: MoveItPy, arm, gz_node, index: int, rng: random.Random, color: str) -> Trial:
+def _recover_to_ready(robot: MoveItPy, arm, index: int) -> bool:
+    """Put the cell back into the state `pick_one` says it assumes.
+
+    `pick_one`'s docstring reads "Assumes the arm starts clear of the table",
+    and until 2026-09-02 nothing enforced it. One failed return-to-ready left the
+    arm parked over the table, the next trial applied `target_object` underneath
+    it, and every plan from then on aborted instantly on the start state: 23
+    consecutive trials scored as motion failures while the cell was never asked
+    to do anything it could have done.
+
+    So each trial now starts by clearing what the previous one may have left
+    behind, an attachment and a stale collision object, and then requiring the
+    ready posture rather than hoping for it. A trial that cannot get there is
+    recorded as `recovery`, which is a fault of the run and not a grasp the cell
+    failed.
+    """
+    _set_attached(robot, OBJECT_ID, attach=False)
+    remove_object(robot)
+    time.sleep(0.2)
+    if _go_to_named(robot, arm, READY_STATE, "recover"):
+        return True
+    logger.warn(f"trial {index}: could not return to ready with an empty scene")
+    return False
+
+
+def _run_trial(robot: MoveItPy, arm, gz_node, truth: GroundTruth, ack: AnimatorAck,
+               index: int, rng: random.Random, color: str) -> Trial:
     started = time.time()
     x = rng.uniform(X_MIN, X_MAX)
     y = rng.uniform(Y_MIN, Y_MAX)
 
+    # The precondition, enforced before the part is placed, so the arm is never
+    # standing where the next placement is about to appear.
+    if not _recover_to_ready(robot, arm, index):
+        return Trial(index, x, y, False, None, None, None, False, "recovery",
+                     time.time() - started)
+
     # Drop any belt state from the previous trial before touching poses, or the
     # animator will overwrite the placement this trial is about to command.
+    #
+    # WAITED FOR, NOT SLEPT THROUGH, AND ACKNOWLEDGED RATHER THAN INFERRED.
+    # This used to publish `reset` and sleep 0.3 s. The animator answers a reset
+    # by writing all three parts back to PART_HOMES, and when that write landed
+    # after the placement below, the trial measured a part sitting at
+    # part_green's home instead of the sampled pose.
+    # See GroundTruth. The reset is now confirmed against Gazebo's own pose feed
+    # before anything else is commanded, so there is no write left in flight.
+    # The acknowledgement matters as much as the poses: on a fresh simulation the
+    # parts are ALREADY home, so the pose check alone passes without the animator
+    # having acted, and its writes then landed on top of the parking. That failed
+    # trial 1 of a campaign with "part_red did not park".
+    ack.arm()
     _reset_animator()
-    time.sleep(0.3)
+    if not ack.wait():
+        logger.warn(f"trial {index}: part_animator never acknowledged the reset")
+        return Trial(index, x, y, False, None, None, None, False, "reset",
+                     time.time() - started)
+    for part, (hx, hy, _) in PART_HOMES.items():
+        if not wait_until_at(truth, part, hx, hy):
+            logger.warn(f"trial {index}: {part} never returned home; "
+                        f"the animator reset did not land")
+            return Trial(index, x, y, False, None, None, None, False, "reset",
+                         time.time() - started)
 
     # Park every part, then place only the sampled one. Parking first means a
     # trial cannot inherit the previous trial's leftover position.
     for other, home in PARKED.items():
         _gz_set_pose(gz_node, f"part_{other}", *home)
-    time.sleep(0.4)
+    for other, home in PARKED.items():
+        if not wait_until_at(truth, f"part_{other}", home[0], home[1], tol_m=PARK_TOL_M):
+            logger.warn(f"trial {index}: part_{other} did not park")
+            return Trial(index, x, y, False, None, None, None, False, "set_pose",
+                         time.time() - started)
     if not _gz_set_pose(gz_node, f"part_{color}", x, y, PART_CENTRE_Z):
         return Trial(index, x, y, False, None, None, None, False, "set_pose", time.time() - started)
+
+    # The placement is confirmed against the simulator before it is measured.
+    # An accepted set_pose is a request, and the difference between a request
+    # and a pose cost two rows of a campaign.
+    if not wait_until_at(truth, f"part_{color}", x, y):
+        got = truth.get(f"part_{color}")
+        logger.warn(
+            f"trial {index}: commanded ({x:.3f}, {y:.3f}) but Gazebo holds "
+            f"{'nothing' if got is None else f'({got[0]:.3f}, {got[1]:.3f})'}"
+        )
+        return Trial(index, x, y, False, None, None, None, False, "set_pose",
+                     time.time() - started)
 
     # Give the camera and detector time to see the moved part before asking.
     time.sleep(1.2)
@@ -225,8 +382,11 @@ def _run_trial(robot: MoveItPy, arm, gz_node, index: int, rng: random.Random, co
                      "placement", time.time() - started)
 
     err_mm = math.hypot(top[0] - x, top[1] - y) * 1000.0
-    ok = pick_one(robot, arm, top, f"part_{color}")
-    _go_to_named(robot, arm, READY_STATE, "home")
+    with MotionWatchdog(robot, index) as watchdog:
+        ok = pick_one(robot, arm, top, f"part_{color}")
+        _go_to_named(robot, arm, READY_STATE, "home")
+    if watchdog.fired:
+        ok = False
 
     return Trial(
         trial=index,
@@ -237,7 +397,7 @@ def _run_trial(robot: MoveItPy, arm, gz_node, index: int, rng: random.Random, co
         perceived_y=round(top[1], 4),
         perception_error_mm=round(err_mm, 2),
         success=ok,
-        failed_stage="" if ok else "motion",
+        failed_stage="" if ok else ("timeout" if watchdog.fired else "motion"),
         seconds=round(time.time() - started, 2),
     )
 
@@ -274,7 +434,8 @@ def _summarise(trials: list[Trial], csv_path: Path) -> None:
             f"perception error  median {errs_sorted[len(errs) // 2]:.1f} mm, "
             f"worst {max(errs):.1f} mm, n={len(errs)}"
         )
-    for stage in ("set_pose", "perception", "placement", "motion"):
+    for stage in ("recovery", "reset", "set_pose", "perception", "placement", "motion",
+              "timeout"):
         count = sum(t.failed_stage == stage for t in trials)
         if count:
             logger.info(f"failed at {stage:<10} {count}")
@@ -308,6 +469,15 @@ def main() -> None:
     ppn._carry_pub = _comm.create_publisher(String, "/carry_cmd", _qos)
 
     rng = random.Random(seed)
+    truth = GroundTruth()
+    ack = AnimatorAck()
+    if not truth.wait_for_feed():
+        logger.error(
+            f"no poses on /world/{WORLD_NAME}/pose/info, so a placement cannot be "
+            f"confirmed and nothing measured here would mean anything"
+        )
+        rclpy.try_shutdown()
+        return
     robot = MoveItPy(node_name="benchmark_placements")
     arm = robot.get_planning_component(PLANNING_GROUP)
 
@@ -319,9 +489,23 @@ def main() -> None:
         _build_static_scene(robot)
         time.sleep(0.5)
 
+        # A run that cannot put the arm back where a trial starts is not
+        # measuring the cell any more. Three in a row is not bad luck.
+        consecutive_recovery_failures = 0
+
         for i in range(1, trials_n + 1):
-            t = _run_trial(robot, arm, gz_node, i, rng, color)
+            t = _run_trial(robot, arm, gz_node, truth, ack, i, rng, color)
             results.append(t)
+            if t.failed_stage == "recovery":
+                consecutive_recovery_failures += 1
+                if consecutive_recovery_failures >= 3:
+                    logger.error(
+                        "three consecutive trials could not reach the ready posture "
+                        "with an empty scene; stopping rather than recording noise"
+                    )
+                    break
+            else:
+                consecutive_recovery_failures = 0
             # Written now, not at the end. The `finally` below cannot be relied
             # on: this node spends nearly all its time blocked inside MoveIt's
             # C++ execution, where a SIGINT is not delivered until control

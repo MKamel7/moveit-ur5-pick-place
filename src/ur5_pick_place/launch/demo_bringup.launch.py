@@ -91,6 +91,16 @@ def generate_launch_description():
         parameters=[{"use_sim_time": True}],
     )
 
+    # An evaluation oracle, never an input: the placement benchmark uses it to
+    # confirm a part reached the pose a trial commanded. See ground_truth_node.
+    ground_truth = Node(
+        package="ur5_pick_place",
+        executable="ground_truth_node",
+        name="ground_truth_publisher",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -110,5 +120,6 @@ def generate_launch_description():
             camera_bridge,
             detector,
             animator,
+            ground_truth,
         ]
     )

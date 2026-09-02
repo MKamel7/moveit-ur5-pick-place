@@ -141,6 +141,23 @@ def _apply_object(robot: MoveItPy, obj: CollisionObject) -> None:
         scene.current_state.update()
 
 
+def remove_object(robot: MoveItPy, object_id: str = OBJECT_ID) -> None:
+    """Take an object out of the planning scene entirely.
+
+    `_apply_object` moves an object by re-adding it under the same id, which is
+    right during a pick and wrong between trials: the box stays wherever it was
+    last applied, and if the arm happens to be resting there when the next one
+    is applied, every plan aborts on CheckStartStateCollision with
+    `forearm_link - target_object` and the cell cannot recover on its own. A
+    campaign hit that on 2026-09-02 and lost 23 trials in a row.
+    """
+    obj = CollisionObject()
+    obj.id = object_id
+    obj.header.frame_id = BASE_FRAME
+    obj.operation = CollisionObject.REMOVE
+    _apply_object(robot, obj)
+
+
 def _set_attached(robot: MoveItPy, object_id: str, attach: bool) -> None:
     aco = AttachedCollisionObject()
     aco.link_name = EEF_LINK
@@ -233,6 +250,16 @@ def pick_one(robot: MoveItPy, arm, pick_top, part_model: str) -> bool:
     _set_attached(robot, OBJECT_ID, attach=False)
     if not _go_to_pose(robot, arm, make_pose(place_pre.position, place_pre.orientation), "retreat"):
         return False
+
+    # The part is on the conveyor and being carried away, so the box that
+    # described it no longer describes anything. Left in the scene it sits at
+    # the place pose, which is exactly where the wrist is, and the next plan
+    # aborts on `CheckStartStateCollision: target_object - wrist_3_link`: nine
+    # such aborts in the first ten trials of a campaign, every one of them a
+    # return-to-ready failing against a phantom. Removed after the retreat and
+    # not before it, so the object is still collision-checked while the arm is
+    # actually beside the part.
+    remove_object(robot, OBJECT_ID)
 
     logger.info(f"{part_model} placed on the conveyor")
     return True

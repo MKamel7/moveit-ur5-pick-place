@@ -29,6 +29,7 @@ setup(
             "obstacle_demo = ur5_pick_place.obstacle_demo:main",
             "detector_node = ur5_pick_place.detector_node:main",
             "part_animator = ur5_pick_place.part_animator:main",
+            "ground_truth_node = ur5_pick_place.ground_truth_node:main",
             "benchmark_placements = ur5_pick_place.benchmark_placements:main",
         ],
     },
