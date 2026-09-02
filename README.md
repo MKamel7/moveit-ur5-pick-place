@@ -163,6 +163,54 @@ All numbers are from my own runs.
   grasp, lift, transfer, place, retreat) planned and executed with the
   trajectory controller reporting SUCCEEDED at every step.
 
+## Randomised placement campaign
+
+100 seeded trials on 2026-09-02, one part on a table, position randomised over the reachable
+window. This replaces the aggregate success rate this README previously declined to quote.
+
+| | measured |
+|---|---|
+| trials | **100**, seeded (`BENCH_SEED=0`) and reproducible |
+| detection | **100 of 100** |
+| end to end pick and place | **92 of 100** |
+| perception error | p50 **4.0 mm**, p95 **7.3 mm**, worst **8.9 mm** |
+| trial duration | p50 45 s, p95 63 s, worst 346 s |
+| failed inside the harness | 0 |
+
+Every row is in [`docs/benchmark_placements.csv`](docs/benchmark_placements.csv), and
+`python3 tools/summarise_benchmark.py docs/benchmark_placements.csv` regenerates every figure above
+from it with no ROS installed. `src/ur5_pick_place/test/test_benchmark_claims.py` fails the build if
+this table and that file disagree.
+
+**What the eight failures are, and what they are not.** All eight failed in motion, at the `lift` or
+`retreat` stage, after OMPL gave up on three planning attempts. None failed at perception: the
+detector found the part in all 100 trials, and the pose error on the eight failures (p50 3.3 mm) is
+no worse than on the 92 successes. So this is a planning result, not a vision one.
+
+**They are not explained by where the part was.** Watching the run, the first failures looked like a
+far-corner pattern, and the full set refutes it: the median distance from a failed placement to the
+edge of the sampling window is 48.9 mm against 50.4 mm for the successes, and one failure sat at
+(0.587, 0.202), the middle of the table, with a 0.72 mm pose error. Eight failures spread over the
+workspace with no positional signal is a variance result, and the honest reading is that
+constrained planning out of a grasp fails a few percent of the time regardless of where the part is.
+
+**Conditions**, because a number without them is not reproducible: Ubuntu 24.04, ROS 2 Jazzy,
+Gazebo Harmonic headless (`gazebo_gui:=false`), Intel Iris Xe with no discrete GPU, 12 cores,
+real-time factor 1.036 measured during the run. Total wall clock 81 minutes.
+
+**What was randomised, and what was not.** Position only, uniform over the table window minus a
+60 mm margin. Yaw, RGB-D noise, lighting and occlusion were not varied, so this measures the cell
+against placement, not against perception difficulty. Those remain in the roadmap below.
+
+**Three harness faults were found and fixed before this run, and the count is what it cost.** An
+earlier attempt scored a trial SUCCESS against a part sitting at its home pose rather than the
+sampled one; another froze for 8.7 hours on trial 53 because MoveIt waits on a controller goal with
+no deadline; a third recorded 23 consecutive failures while the arm was stuck in a start-state
+collision it could not plan out of. Each is now checked rather than assumed: placements are
+confirmed against the simulator's own poses, a trial is bounded at 420 s and recorded as `timeout`
+rather than as a failed grasp, and every trial begins by restoring the ready posture that
+`pick_one` had only ever assumed. The zero in the table above is the gate on all three.
+
 ## Honest scope
 
 Validated **hardware in the loop** against URSim, which runs the same URControl
@@ -177,25 +225,29 @@ software and RTDE interface as a physical UR5e. This is not sim to real:
   prerequisite for real hardware.
 - The dashboard reports throughput, cycle time and counts. Those are process
   metrics, not an OEE figure.
-- A randomised multi-trial success-rate evaluation is not automated, so no
-  aggregate success rate is quoted here.
+- The campaign above randomises position only. Yaw, RGB-D noise, lighting and
+  occlusion are not varied, so 92 of 100 is a statement about placement and not
+  about perception difficulty.
 
-<<<<<<< Updated upstream
 Further documentation: `ros2_docs/SAFETY.md` for the functional-safety layer,
 `ros2_docs/HARDWARE.md` for running against a real arm, and
 `ros2_docs/DEMO_VIDEO.md` for how the four-panel video is captured and rendered.
-=======
+
 ## Roadmap
 
-**Safety first, and these are open bugs rather than features:**
+**Safety, done:** the fail-open inputs are closed (`guard_closed` and `human_present` start as
+`None`, so nothing is assumed shut or empty, and the staleness watchdog no longer waits for a first
+JointState that may never arrive), the supervisor's latching and reset interlock are covered by
+`src/armik_moveit/test/test_safety_logic.py`, and `docs/safety_fmea.md` carries the FMEA table.
 
-- **Close the fail-open safety inputs.** `safety_supervisor.py` defaults `guard_closed=True` and `human_present=False` with no staleness check, and line 88 reads `if self.last_joint and ...` with `last_joint` initialised to `0.0`, so **the watchdog is disabled until the first JointState ever arrives**. A supervisor started against a dead safety bus publishes RUN at full speed.
-- **Test the supervisor at all.** Its latching and reset interlock are correct and nothing protects either.
+**Still open:**
+
 - **Lint `tools/`.** CI runs `ruff check src/`, so it is excluded by omission rather than by rule.
 
 **Then:**
 
-- **Build and run a statistical grasp campaign** — 100 to 500 randomised trials over position, yaw, RGB-D noise, lighting and occlusion, reporting detection success, position error at p50 and p95, grasp success and end-to-end cycle success. The README currently declines to quote an aggregate success rate, which is honest and worth replacing with a measured one.
+- **Widen the grasp campaign beyond position.** The 100-trial position campaign is done and reported above; yaw, RGB-D noise, lighting and occlusion are still unvaried, and the interesting one is yaw, since the grasp is top-down and the gripper has a preferred approach.
+- **Find out why constrained planning out of a grasp fails 8% of the time.** Every failure in the campaign was a `lift` or `retreat` plan giving up after three attempts, with no dependence on where the part was. That is one specific question with a measured baseline to check a fix against.
 - **Real RGB-D before real robot** — a RealSense or ZED with AprilTag extrinsic calibration, still driving URSim. Genuine perception noise and calibration error with no hardware risk.
 - **Typed interfaces instead of implicit state** — `DetectObject`, `PlanGrasp`, `ExecutePick` as actions rather than topic availability as a state machine, then MoveIt Task Constructor for an explicit task graph.
 - **An FMEA table for the supervisor** — four safety inputs, each with its failure modes, detection mechanism and the test that proves it.
@@ -207,7 +259,6 @@ camera and classical colour segmentation localise a selected part to a 3D grasp
 pose (1-2 mm accuracy in sim), then OMPL plans a collision-aware, obstacle-avoiding
 top-down grasp that places it on a conveyor, with a unit-tested perception core
 and CI.
->>>>>>> Stashed changes
 
 ## License
 
