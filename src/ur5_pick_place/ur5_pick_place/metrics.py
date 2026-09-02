@@ -86,3 +86,25 @@ def cartesian_path_length(points: Sequence[Sequence[float]]) -> float:
         return 0.0
     arr = [np.asarray(p, dtype=float) for p in points]
     return float(sum(np.linalg.norm(arr[i + 1] - arr[i]) for i in range(len(arr) - 1)))
+
+
+def percentile(values, q: float) -> float:
+    """Nearest-rank percentile, q in 0..100. Empty input is an error, not 0.0.
+
+    ONE IMPLEMENTATION, because there were two. The benchmark node printed its
+    perception-error median as `sorted(errs)[len(errs) // 2]`, which is the
+    upper of the two middle values on an even sample, while the summariser that
+    regenerates the published table used nearest rank. Same data, two medians,
+    and the README quotes the second: the live log and the committed report
+    could disagree about the same run and nothing would notice.
+
+    Nearest rank, no interpolation: with n=100 the p95 is the 95th smallest
+    value and nothing is invented between samples.
+    """
+    import math
+
+    ordered = sorted(values)
+    if not ordered:
+        raise ValueError("no values to take a percentile of")
+    rank = max(1, math.ceil(q / 100.0 * len(ordered)))
+    return ordered[rank - 1]

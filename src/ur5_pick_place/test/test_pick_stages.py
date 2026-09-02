@@ -17,27 +17,15 @@ from ur5_pick_place.pick_stages import (  # noqa: E402
     STAGE_RETREAT,
     holds_part,
     name,
-    next_stage,
     world_changed,
 )
 
 
-def test_the_stages_run_in_the_order_the_cell_executes_them():
-    assert next_stage(STAGE_NONE) == STAGE_APPROACH
-    assert next_stage(STAGE_APPROACH) == STAGE_DESCEND
-    assert next_stage(STAGE_RETREAT) == STAGE_COMPLETE
-    assert next_stage(STAGE_COMPLETE) == STAGE_COMPLETE
-
-
-def test_walking_the_whole_sequence_ends_once():
-    stage = STAGE_NONE
-    seen = []
-    for _ in range(len(ORDER)):
-        stage = next_stage(stage)
-        seen.append(stage)
-
-    assert seen == list(ORDER)
-    assert seen[-1] == STAGE_COMPLETE
+def test_the_stages_are_in_the_order_the_cell_executes_them():
+    assert ORDER[0] == STAGE_APPROACH
+    assert ORDER[1] == STAGE_DESCEND
+    assert ORDER[-1] == STAGE_COMPLETE
+    assert ORDER[-2] == STAGE_RETREAT
 
 
 def test_an_abort_before_the_grasp_leaves_the_world_alone():

@@ -55,15 +55,6 @@ def name(stage: int) -> str:
     return NAMES[stage]
 
 
-def next_stage(stage: int) -> int:
-    """The stage that follows, or COMPLETE at the end."""
-    if stage == STAGE_NONE:
-        return ORDER[0]
-    if stage == STAGE_COMPLETE:
-        return STAGE_COMPLETE
-    return ORDER[ORDER.index(stage) + 1]
-
-
 def holds_part(stage: int) -> bool:
     """True if a cycle stopped here would leave the gripper holding the part."""
     return FIRST_HOLDING_STAGE <= stage < FIRST_MOVED_STAGE

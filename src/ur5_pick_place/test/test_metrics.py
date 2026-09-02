@@ -70,3 +70,38 @@ def test_cartesian_path_length_arc_is_longer_than_chord():
     length = cartesian_path_length(pts)
     assert length > 2.0
     assert length == pytest.approx(math.pi, abs=1e-2)
+
+
+def test_percentile_is_nearest_rank_and_invents_nothing():
+    """One implementation, because there were two that disagreed.
+
+    The benchmark node printed its median as sorted(errs)[len // 2] while the
+    summariser that regenerates the published table used nearest rank. On an
+    even sample those differ, so the live log and the committed report could
+    disagree about the same run.
+    """
+    from ur5_pick_place.metrics import percentile
+
+    values = [1.0, 2.0, 3.0, 4.0]
+
+    assert percentile(values, 50) == 2.0          # nearest rank, not the mean of 2 and 3
+    assert percentile(values, 100) == 4.0
+    assert percentile(values, 1) == 1.0
+    assert percentile([5.0], 95) == 5.0
+
+
+def test_percentile_refuses_an_empty_sample():
+    """Returning 0.0 for "no data" is how an empty run reports a perfect score."""
+    import pytest
+    from ur5_pick_place.metrics import percentile
+
+    with pytest.raises(ValueError):
+        percentile([], 50)
+
+
+def test_the_published_p95_is_the_95th_of_a_hundred():
+    from ur5_pick_place.metrics import percentile
+
+    values = [float(i) for i in range(1, 101)]
+
+    assert percentile(values, 95) == 95.0

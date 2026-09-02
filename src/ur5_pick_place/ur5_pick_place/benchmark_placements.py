@@ -54,6 +54,7 @@ import rclpy
 from moveit.planning import MoveItPy
 from rclpy.logging import get_logger
 
+from ur5_pick_place.metrics import percentile
 from ur5_pick_place.part_animator import PART_HOMES
 from ur5_pick_place.pick_place_node import (
     OBJECT_ID,
@@ -429,10 +430,9 @@ def _summarise(trials: list[Trial], csv_path: Path) -> None:
     logger.info(f"success           {wins}/{n}  ({100.0 * wins / n:.0f}%)")
     logger.info(f"detected          {detected}/{n}")
     if errs:
-        errs_sorted = sorted(errs)
         logger.info(
-            f"perception error  median {errs_sorted[len(errs) // 2]:.1f} mm, "
-            f"worst {max(errs):.1f} mm, n={len(errs)}"
+            f"perception error  median {percentile(errs, 50):.1f} mm, "
+            f"p95 {percentile(errs, 95):.1f} mm, worst {max(errs):.1f} mm, n={len(errs)}"
         )
     for stage in ("recovery", "reset", "set_pose", "perception", "placement", "motion",
               "timeout"):

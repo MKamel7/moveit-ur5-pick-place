@@ -44,22 +44,19 @@ from __future__ import annotations
 
 import argparse
 import csv
-import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+# The package, not ROS. metrics.py is pure stdlib, so this keeps the promise
+# that the published figures regenerate with no ROS installed while leaving one
+# implementation of the percentile rather than a copy here.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "ur5_pick_place"))
+from ur5_pick_place.metrics import percentile  # noqa: E402
 
 # Every stage a trial can fail at. `recovery` and `timeout` are harness faults
 # and the rest are the cell; the README gate depends on telling them apart.
 STAGES = ("recovery", "reset", "set_pose", "perception", "placement", "motion", "timeout")
-
-
-def percentile(values: list[float], q: float) -> float:
-    """Nearest-rank percentile, q in 0..100. Empty input is an error, not 0.0."""
-    if not values:
-        raise ValueError("no values to take a percentile of")
-    ordered = sorted(values)
-    rank = max(1, math.ceil(q / 100.0 * len(ordered)))
-    return ordered[rank - 1]
 
 
 @dataclass

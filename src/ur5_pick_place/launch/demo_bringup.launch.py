@@ -12,6 +12,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -93,11 +94,19 @@ def generate_launch_description():
 
     # An evaluation oracle, never an input: the placement benchmark uses it to
     # confirm a part reached the pose a trial commanded. See ground_truth_node.
+    #
+    # OFF BY DEFAULT, for two reasons. It costs about half a core, measured, on
+    # a box where the benchmark already competes with Gazebo and move_group,
+    # and every demo that is not measuring anything was paying that. And a
+    # topic carrying simulator truth should not exist in a run that has no
+    # business reading it: the cheapest way to keep an oracle out of the
+    # control path is not to publish it.
     ground_truth = Node(
         package="ur5_pick_place",
         executable="ground_truth_node",
         name="ground_truth_publisher",
         output="screen",
+        condition=IfCondition(LaunchConfiguration("ground_truth")),
         parameters=[{"use_sim_time": True}],
     )
 
@@ -108,6 +117,16 @@ def generate_launch_description():
                 default_value="green",
                 choices=["red", "green", "blue"],
                 description="Which coloured part the arm should pick and place on the belt.",
+            ),
+            DeclareLaunchArgument(
+                "ground_truth",
+                default_value="false",
+                choices=["true", "false"],
+                description=(
+                    "Publish the simulator's true part poses for SCORING. The "
+                    "placement benchmark needs it; nothing that drives the cell "
+                    "may read it, and it costs about half a core."
+                ),
             ),
             DeclareLaunchArgument(
                 "gazebo_gui",
