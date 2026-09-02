@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ur5_mtc</name>
+  <version>0.1.0</version>
+  <description>
+    The pick as a MoveIt Task Constructor graph, so a failed pick names the
+    stage that pruned it instead of returning one boolean.
+
+    C++ rather than Python, and not by preference. MTC's Python bindings cannot
+    build a PipelinePlanner (it takes an rclcpp::Node, which neither moveit_py
+    nor the MTC bindings hand out) and Task.plan fails with "context argument is
+    null" even using only interpolation planners. Every upstream MTC demo is
+    C++ for the same reason. The attempt and its failure are recorded in the
+    README so the next person does not repeat it.
+  </description>
+  <maintainer email="mkamel860@gmail.com">Mohamed Kamel</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>moveit_task_constructor_core</depend>
+  <depend>moveit_core</depend>
+  <depend>geometry_msgs</depend>
+  <depend>moveit_msgs</depend>
+  <depend>shape_msgs</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

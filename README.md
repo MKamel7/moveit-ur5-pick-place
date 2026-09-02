@@ -255,6 +255,55 @@ part, and one during `retreat` means the part is already on the conveyor and the
 world has changed. The stages are reported by `pick_one` itself through a
 callback rather than by a second copy of the sequence living in the server.
 
+## The pick as a task graph (MoveIt Task Constructor)
+
+`pick_one` is a sequence of calls, each returning true or false. It works, it is
+measured at 92 of 100 above, and it has two limits that come from its shape
+rather than its code: it commits to the first grasp it computes, and a failure
+names the CALL that failed rather than the CONSTRAINT that pruned it. All eight
+campaign failures were a `lift` or a `retreat` giving up after three attempts,
+and finding out why meant reading MoveIt's log.
+
+`ur5_mtc` builds the same sequence as an MTC graph, offering several grasp yaws
+instead of one and reporting what every stage let through:
+
+```
+ros2 launch ur5_pick_place demo_bringup.launch.py gazebo_gui:=false
+ros2 launch ur5_mtc mtc_pick.launch.py
+```
+
+    planned in 605.47 s, solved=true, solutions=1
+      connect to pre-grasp            1 solutions      0 rejected
+      grasp candidates               19 solutions      0 rejected
+      descend                         2 solutions      0 rejected
+      attach the part                 2 solutions      0 rejected
+      lift                            2 solutions      0 rejected
+      transfer                        1 solutions      0 rejected
+      IK at place                     6 solutions      0 rejected
+      retreat                         2 solutions      0 rejected
+
+**The diagnosis is the point, and it earned itself during the build.** Three
+runs failed with `first stage to prune everything: descend`, which is a
+sentence the imperative pick cannot produce: 13, then 17, then 12 grasp
+candidates reached the descent and none survived it. Two causes, both invisible
+to a boolean. The graph never added the part to the planning scene, so the
+descent had nothing to descend to and `attach` would have failed on an object
+that did not exist. And `MoveRelative` had no IK frame, so it had no frame to
+drive along the direction and returned nothing at all, which reads as an
+impossible descent rather than a stage that was never told what to move.
+
+**It is ten times slower and that is not a footnote.** 605 s to plan one pick
+with two grasp candidates, against roughly 45 s for the imperative version to
+plan AND execute a whole cycle. Nearly all of it is the OMPL connection to each
+candidate. So this is a diagnostic instrument and a grasp-alternative search,
+not a replacement for the pick the cell runs.
+
+**It is C++ because MTC's Python bindings cannot do this.** `PipelinePlanner`
+takes an `rclcpp::Node`, and neither `moveit_py` nor the MTC bindings hand one
+out; falling back to interpolation-only planners does not help, because
+`Task.plan` then fails with "context argument is null". Every upstream MTC demo
+is C++ for the same reason. The Python attempt was written, run, and deleted.
+
 ## Honest scope
 
 Validated **hardware in the loop** against URSim, which runs the same URControl
@@ -293,7 +342,7 @@ JointState that may never arrive), the supervisor's latching and reset interlock
 - **Widen the grasp campaign beyond position.** The 100-trial position campaign is done and reported above; yaw, RGB-D noise, lighting and occlusion are still unvaried, and the interesting one is yaw, since the grasp is top-down and the gripper has a preferred approach.
 - **Find out why constrained planning out of a grasp fails 8% of the time.** Every failure in the campaign was a `lift` or `retreat` plan giving up after three attempts, with no dependence on where the part was. That is one specific question with a measured baseline to check a fix against.
 - **Real RGB-D before real robot.** A RealSense or ZED with AprilTag extrinsic calibration, still driving URSim, for genuine perception noise and calibration error with no hardware risk. Blocked on a camera.
-- **A MoveIt Task Constructor task graph.** The three actions above make the cell's outcomes typed; MTC would make the sequence itself declarative rather than a Python function calling helpers in order. Installed and importable on this machine, not yet used.
+- **Find out why the MTC graph needs 605 s where the imperative pick needs 45.** Nearly all of it is the OMPL connection to each grasp candidate, so the question is whether a cheaper connect (or fewer candidates reaching it) makes the task graph usable for more than diagnosis.
 
 ## One-line summary for a CV
 
