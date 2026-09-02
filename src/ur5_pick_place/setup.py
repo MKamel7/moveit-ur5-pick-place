@@ -31,6 +31,7 @@ setup(
             "part_animator = ur5_pick_place.part_animator:main",
             "ground_truth_node = ur5_pick_place.ground_truth_node:main",
             "benchmark_placements = ur5_pick_place.benchmark_placements:main",
+            "cell_actions = ur5_pick_place.cell_actions:main",
         ],
     },
 )

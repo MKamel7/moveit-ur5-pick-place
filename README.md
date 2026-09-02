@@ -211,6 +211,50 @@ confirmed against the simulator's own poses, a trial is bounded at 420 s and rec
 rather than as a failed grasp, and every trial begins by restoring the ready posture that
 `pick_one` had only ever assumed. The zero in the table above is the gate on all three.
 
+## Typed actions, so a caller learns what happened
+
+The cell used to answer in booleans and topic availability. Perception published
+on a latched topic, so a silent `/detected/green` could mean the camera sees
+nothing, the detector died, nobody launched it, or a pose from three minutes ago
+is still being served, and every one of those read the same. Planning and
+execution returned one boolean, so "unreachable", "already in collision" and "no
+collision-free path" were indistinguishable, and the placement campaign recorded
+all three as `failed_stage="motion"`.
+
+Three actions in `ur5_pick_place_msgs` now carry the distinctions, and
+`cell_actions.py` serves them:
+
+```
+ros2 launch ur5_pick_place demo_bringup.launch.py gazebo_gui:=false
+ros2 launch ur5_pick_place cell_actions.launch.py
+python3 tools/cell_action_client.py --color green
+```
+
+    detect_object  success=True failure=none age=0.05s
+    plan_grasp     success=True failure=none in 0.11s  planned
+    execute_pick   success=True reached=complete in 57.9s  completed
+
+**Every failure code was produced on the running cell, not asserted in a
+docstring.** Killing the detector gives `PERCEPTION_UNAVAILABLE`; freezing it
+gives `NO_DETECTION`; stopping the camera bridge while the simulation keeps
+running gives `STALE`, reported as *"pose is 13.85s old, older than the 1.00s
+budget"*, which is the case a latched topic can never distinguish from a healthy
+one. A target 2 m away is refused as `TARGET_OUT_OF_WORKSPACE` in 0.13 ms
+instead of after five seconds of search.
+
+**The decisions live outside the node.** `detection_outcome.py`,
+`plan_outcome.py` and `pick_stages.py` import no ROS and no MoveIt, so the
+classification is unit tested on a plain runner while the node stays glue. The
+ordering matters and is tested: an unreachable target also has no IK solution
+and also finds no plan, so the checks run outermost cause first, or every
+diagnosis in the cell would read "no plan found".
+
+**`ExecutePick` reports the stage it reached**, because the stage answers the
+question a boolean cannot: an abort during `lift` leaves the gripper holding the
+part, and one during `retreat` means the part is already on the conveyor and the
+world has changed. The stages are reported by `pick_one` itself through a
+callback rather than by a second copy of the sequence living in the server.
+
 ## Honest scope
 
 Validated **hardware in the loop** against URSim, which runs the same URControl
@@ -249,7 +293,7 @@ JointState that may never arrive), the supervisor's latching and reset interlock
 - **Widen the grasp campaign beyond position.** The 100-trial position campaign is done and reported above; yaw, RGB-D noise, lighting and occlusion are still unvaried, and the interesting one is yaw, since the grasp is top-down and the gripper has a preferred approach.
 - **Find out why constrained planning out of a grasp fails 8% of the time.** Every failure in the campaign was a `lift` or `retreat` plan giving up after three attempts, with no dependence on where the part was. That is one specific question with a measured baseline to check a fix against.
 - **Real RGB-D before real robot** — a RealSense or ZED with AprilTag extrinsic calibration, still driving URSim. Genuine perception noise and calibration error with no hardware risk.
-- **Typed interfaces instead of implicit state** — `DetectObject`, `PlanGrasp`, `ExecutePick` as actions rather than topic availability as a state machine, then MoveIt Task Constructor for an explicit task graph.
+- **A MoveIt Task Constructor task graph.** The three actions below make the cell's outcomes typed; MTC would make the sequence itself declarative rather than a Python function calling helpers in order. Installed and importable on this machine, not yet used.
 - **An FMEA table for the supervisor** — four safety inputs, each with its failure modes, detection mechanism and the test that proves it.
 
 ## One-line summary for a CV

@@ -27,6 +27,7 @@ from moveit.planning import MoveItPy
 from moveit_msgs.msg import AttachedCollisionObject, CollisionObject
 from rclpy.logging import get_logger
 
+from ur5_pick_place import pick_stages
 from ur5_pick_place.grasp import pregrasp_pose, retreat_pose, top_down_grasp
 from ur5_pick_place.moveit_env import (
     BASE_FRAME,
@@ -209,12 +210,28 @@ def _apply_front_constraint(arm) -> None:
     arm.set_path_constraints(c)
 
 
-def pick_one(robot: MoveItPy, arm, pick_top, part_model: str) -> bool:
+def pick_one(robot: MoveItPy, arm, pick_top, part_model: str, on_stage=None,
+             place_xyz=None) -> bool:
     """Pick the part at ``pick_top`` and place it on the conveyor. True on success.
 
     Assumes the arm starts clear of the table (e.g. at the ready posture) and the
     static scene (table, belt) is already applied.
+
+    ``place_xyz`` is where the part is put down, defaulting to the conveyor.
+    It is a parameter because ExecutePick lets a caller name the destination,
+    and a cell whose only possible destination is a constant cannot honour that.
+
+    ``on_stage(stage)`` is called as each stage of `pick_stages` is entered, so a
+    caller can report progress and, more usefully, say afterwards WHERE a failed
+    cycle stopped. It exists because the alternative was writing this sequence a
+    second time inside the action server, and two implementations of the same
+    pick is how the cell would come to have two behaviours. Default None keeps
+    every existing caller, including the placement benchmark, unchanged.
     """
+    def stage(step: int) -> None:
+        if on_stage is not None:
+            on_stage(step)
+
     half_h = OBJECT_SIZE[2] / 2.0
     object_center = (pick_top[0], pick_top[1], pick_top[2] - half_h)
     grasp_z_offset = half_h + GRASP_CLEARANCE
@@ -225,29 +242,35 @@ def pick_one(robot: MoveItPy, arm, pick_top, part_model: str) -> bool:
     grasp = top_down_grasp(object_center, z_offset=grasp_z_offset)
     pre = pregrasp_pose(grasp, STANDOFF)
     lift = retreat_pose(grasp, STANDOFF)
-    place = top_down_grasp(PLACE_XYZ, z_offset=grasp_z_offset)
+    place = top_down_grasp(place_xyz or PLACE_XYZ, z_offset=grasp_z_offset)
     place_pre = pregrasp_pose(place, STANDOFF)
 
-    for label, gp in (
-        ("pre-grasp", make_pose(pre.position, pre.orientation)),
-        ("grasp", make_pose(grasp.position, grasp.orientation)),
+    for step, label, gp in (
+        (pick_stages.STAGE_APPROACH, "pre-grasp", make_pose(pre.position, pre.orientation)),
+        (pick_stages.STAGE_DESCEND, "grasp", make_pose(grasp.position, grasp.orientation)),
     ):
+        stage(step)
         if not _go_to_pose(robot, arm, gp, label):
             return False
 
+    stage(pick_stages.STAGE_GRASP)
     _set_attached(robot, OBJECT_ID, attach=True)
     _allow_collisions(robot, OBJECT_ID, [TABLE_ID, CONVEYOR_ID], allow=True)
     _carry_signal("attach", part_model)
+    stage(pick_stages.STAGE_LIFT)
     if not _go_to_pose(robot, arm, make_pose(lift.position, lift.orientation), "lift"):
         return False
 
+    stage(pick_stages.STAGE_TRANSFER)
     transfer = make_pose(place_pre.position, place_pre.orientation)
     if not _go_to_pose(robot, arm, transfer, "transfer"):
         return False
     if not _go_to_pose(robot, arm, make_pose(place.position, place.orientation), "place"):
         return False
+    stage(pick_stages.STAGE_RELEASE)
     _carry_signal("detach", part_model)  # drop on the belt; the conveyor carries it away
     _set_attached(robot, OBJECT_ID, attach=False)
+    stage(pick_stages.STAGE_RETREAT)
     if not _go_to_pose(robot, arm, make_pose(place_pre.position, place_pre.orientation), "retreat"):
         return False
 
@@ -261,6 +284,7 @@ def pick_one(robot: MoveItPy, arm, pick_top, part_model: str) -> bool:
     # actually beside the part.
     remove_object(robot, OBJECT_ID)
 
+    stage(pick_stages.STAGE_COMPLETE)
     logger.info(f"{part_model} placed on the conveyor")
     return True
 
