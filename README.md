@@ -292,9 +292,8 @@ JointState that may never arrive), the supervisor's latching and reset interlock
 
 - **Widen the grasp campaign beyond position.** The 100-trial position campaign is done and reported above; yaw, RGB-D noise, lighting and occlusion are still unvaried, and the interesting one is yaw, since the grasp is top-down and the gripper has a preferred approach.
 - **Find out why constrained planning out of a grasp fails 8% of the time.** Every failure in the campaign was a `lift` or `retreat` plan giving up after three attempts, with no dependence on where the part was. That is one specific question with a measured baseline to check a fix against.
-- **Real RGB-D before real robot** — a RealSense or ZED with AprilTag extrinsic calibration, still driving URSim. Genuine perception noise and calibration error with no hardware risk.
-- **A MoveIt Task Constructor task graph.** The three actions below make the cell's outcomes typed; MTC would make the sequence itself declarative rather than a Python function calling helpers in order. Installed and importable on this machine, not yet used.
-- **An FMEA table for the supervisor** — four safety inputs, each with its failure modes, detection mechanism and the test that proves it.
+- **Real RGB-D before real robot.** A RealSense or ZED with AprilTag extrinsic calibration, still driving URSim, for genuine perception noise and calibration error with no hardware risk. Blocked on a camera.
+- **A MoveIt Task Constructor task graph.** The three actions above make the cell's outcomes typed; MTC would make the sequence itself declarative rather than a Python function calling helpers in order. Installed and importable on this machine, not yet used.
 
 ## One-line summary for a CV
 
