@@ -1,5 +1,11 @@
 # Vision-Guided Pick & Place
 
+[![CI](https://github.com/MKamel7/moveit-ur5-pick-place/actions/workflows/ci.yml/badge.svg)](https://github.com/MKamel7/moveit-ur5-pick-place/actions)
+[![ROS 2](https://img.shields.io/badge/ROS%202-Jazzy-blue)](https://docs.ros.org)
+[![MoveIt 2](https://img.shields.io/badge/MoveIt-2-informational)](https://moveit.ros.org)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
+
+
 Vision-guided, collision-aware pick-and-place for a simulated Universal Robots
 UR5e with MoveIt 2 on ROS 2 Jazzy, framed as an industrial colour-sorting cell.
 An overhead RGB-D camera segments three coloured parts by HSV, the selected one
@@ -29,7 +35,7 @@ cycles and a safety event fit. Everything in it is real; nothing is cut.*
 
 ROS 2 Jazzy · MoveIt 2 · OMPL · Gazebo Harmonic · RGB-D perception · OPC UA
 
-## What it does
+## ⚙️ What it does
 
 1. Brings up a UR5e with a Robotiq 2F-85 in Gazebo (gz-sim Harmonic) with
    MoveIt 2 and ros2_control.
@@ -44,7 +50,7 @@ ROS 2 Jazzy · MoveIt 2 · OMPL · Gazebo Harmonic · RGB-D perception · OPC UA
 5. Supervises the whole thing with a functional-safety layer and publishes
    process telemetry over OPC UA to a live dashboard.
 
-## Architecture
+## 🏗️ Architecture
 
 Reusable, ROS-independent logic lives in `src/ur5_pick_place/` and is unit
 tested without a running robot:
@@ -85,7 +91,7 @@ RGB-D camera (gz) --ros_gz_bridge--> /rgbd_camera/{image,depth_image,camera_info
                               /cell/telemetry -> opcua_server + dashboard
 ```
 
-## Build
+## 🔨 Build
 
 Requires ROS 2 Jazzy with MoveIt 2, the Universal Robots packages and
 `ur_simulation_gz`.
@@ -97,7 +103,7 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-## Run
+## ▶️ Run
 
 The full sorting cell with the digital shadow:
 
@@ -129,7 +135,7 @@ RViz is off by default in the Gazebo launches because Gazebo and RViz together
 overwhelm this machine's integrated GPU; planning runs in `move_group`
 regardless.
 
-## Test
+## 🧪 Test
 
 ```bash
 cd src/ur5_pick_place
@@ -144,7 +150,7 @@ Jazzy container. `tools/test_twin_mirror.py` and `tools/test_twin_grasp.py`
 check the digital shadow against TF and check that a carried part holds a fixed
 offset in the gripper frame.
 
-## Measured results
+## 📊 Measured results
 
 All numbers are from my own runs.
 
@@ -163,7 +169,7 @@ All numbers are from my own runs.
   grasp, lift, transfer, place, retreat) planned and executed with the
   trajectory controller reporting SUCCEEDED at every step.
 
-## Randomised placement campaign
+## 🎲 Randomised placement campaign
 
 100 seeded trials on 2026-09-02, one part on a table, position randomised over the reachable
 window. This replaces the aggregate success rate this README previously declined to quote.
@@ -211,7 +217,7 @@ confirmed against the simulator's own poses, a trial is bounded at 420 s and rec
 rather than as a failed grasp, and every trial begins by restoring the ready posture that
 `pick_one` had only ever assumed. The zero in the table above is the gate on all three.
 
-## Typed actions, so a caller learns what happened
+## 📨 Typed actions, so a caller learns what happened
 
 The cell used to answer in booleans and topic availability. Perception published
 on a latched topic, so a silent `/detected/green` could mean the camera sees
@@ -255,7 +261,7 @@ part, and one during `retreat` means the part is already on the conveyor and the
 world has changed. The stages are reported by `pick_one` itself through a
 callback rather than by a second copy of the sequence living in the server.
 
-## The pick as a task graph (MoveIt Task Constructor)
+## 🗺️ The pick as a task graph
 
 `pick_one` is a sequence of calls, each returning true or false. It works, it is
 measured at 92 of 100 above, and it has two limits that come from its shape
@@ -304,7 +310,7 @@ out; falling back to interpolation-only planners does not help, because
 `Task.plan` then fails with "context argument is null". Every upstream MTC demo
 is C++ for the same reason. The Python attempt was written, run, and deleted.
 
-## Honest scope
+## ⚠️ Honest scope
 
 Validated **hardware in the loop** against URSim, which runs the same URControl
 software and RTDE interface as a physical UR5e. This is not sim to real:
@@ -326,7 +332,26 @@ Further documentation: `ros2_docs/SAFETY.md` for the functional-safety layer,
 `ros2_docs/HARDWARE.md` for running against a real arm, and
 `ros2_docs/DEMO_VIDEO.md` for how the four-panel video is captured and rendered.
 
-## Roadmap
+## 💡 What I learned
+
+- **A planner is only as good as its collision assumptions.** Most of the failures I
+  chased were not planning failures at all. The scene was wrong, so the plan was
+  correct about a world that did not exist.
+
+- **Perception should be testable without the robot.** Pulling the colour segmentation
+  and the depth-to-pose maths out into a unit-tested core meant I could fix a
+  localisation bug in seconds instead of waiting on a simulation to spin up.
+
+- **A caller needs to learn what happened, not just that it failed.** Returning typed
+  outcomes rather than a boolean is the difference between "the pick failed" and "the
+  part was localised but the approach was unreachable", and only one of those tells you
+  what to change.
+
+- **Randomised placement finds what a fixed demo hides.** A scripted pick from the same
+  spot proves almost nothing. Running the campaign across randomised placements is
+  where the real success rate appeared.
+
+## 🔭 Future improvements
 
 **Safety, done:** the fail-open inputs are closed (`guard_closed` and `human_present` start as
 `None`, so nothing is assumed shut or empty, and the staleness watchdog no longer waits for a first
@@ -344,14 +369,6 @@ JointState that may never arrive), the supervisor's latching and reset interlock
 - **Real RGB-D before real robot.** A RealSense or ZED with AprilTag extrinsic calibration, still driving URSim, for genuine perception noise and calibration error with no hardware risk. Blocked on a camera.
 - **Find out why the MTC graph needs 605 s where the imperative pick needs 45.** Nearly all of it is the OMPL connection to each grasp candidate, so the question is whether a cheaper connect (or fewer candidates reaching it) makes the task graph usable for more than diagnosis.
 
-## One-line summary for a CV
-
-Built a vision-guided UR5e pick-and-place in ROS 2 Jazzy and MoveIt 2: an RGB-D
-camera and classical colour segmentation localise a selected part to a 3D grasp
-pose (1-2 mm accuracy in sim), then OMPL plans a collision-aware, obstacle-avoiding
-top-down grasp that places it on a conveyor, with a unit-tested perception core
-and CI.
-
-## License
+## 📄 License
 
 MIT. See `LICENSE`.
