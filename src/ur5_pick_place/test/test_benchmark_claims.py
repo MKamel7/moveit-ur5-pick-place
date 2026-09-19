@@ -53,7 +53,7 @@ def measured():
 def quoted():
     text = README.read_text(encoding="utf-8")
     section = re.search(
-        r"## Randomised placement campaign(.*?)(?=\n## )", text, re.S
+        r"## [^\n]*Randomised placement campaign(.*?)(?=\n## )", text, re.S
     )
     assert section, "the README has no campaign section for this gate to check"
     return section.group(1)
