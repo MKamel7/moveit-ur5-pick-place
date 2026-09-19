@@ -35,6 +35,16 @@ cycles and a safety event fit. Everything in it is real; nothing is cut.*
 
 ROS 2 Jazzy · MoveIt 2 · OMPL · Gazebo Harmonic · RGB-D perception · OPC UA
 
+## 🛠️ Built with
+
+| | |
+| --- | --- |
+| **Robotics** | ROS 2 Jazzy, MoveIt 2, MoveIt Task Constructor, OMPL |
+| **Simulation** | Gazebo, URSim teach pendant |
+| **Perception** | RGB-D camera, OpenCV, HSV segmentation, depth-to-pose |
+| **Robot** | Universal Robots UR5e |
+| **Engineering** | Unit-tested perception core, GitHub Actions CI |
+
 ## ⚙️ What it does
 
 1. Brings up a UR5e with a Robotiq 2F-85 in Gazebo (gz-sim Harmonic) with
@@ -310,28 +320,6 @@ out; falling back to interpolation-only planners does not help, because
 `Task.plan` then fails with "context argument is null". Every upstream MTC demo
 is C++ for the same reason. The Python attempt was written, run, and deleted.
 
-## ⚠️ Honest scope
-
-Validated **hardware in the loop** against URSim, which runs the same URControl
-software and RTDE interface as a physical UR5e. This is not sim to real:
-
-- The perception is simulated (Gazebo RGB-D, no real camera or parts), the
-  Robotiq gripper is mocked, and there is no physical robot.
-- The Gazebo view is one way, physical to digital, so it is a digital shadow
-  rather than a full twin.
-- There is no camera calibration: the camera pose is known by construction in
-  simulation. Hand-eye calibration is listed in `ros2_docs/HARDWARE.md` as a
-  prerequisite for real hardware.
-- The dashboard reports throughput, cycle time and counts. Those are process
-  metrics, not an OEE figure.
-- The campaign above randomises position only. Yaw, RGB-D noise, lighting and
-  occlusion are not varied, so 92 of 100 is a statement about placement and not
-  about perception difficulty.
-
-Further documentation: `ros2_docs/SAFETY.md` for the functional-safety layer,
-`ros2_docs/HARDWARE.md` for running against a real arm, and
-`ros2_docs/DEMO_VIDEO.md` for how the four-panel video is captured and rendered.
-
 ## 💡 What I learned
 
 - **A planner is only as good as its collision assumptions.** Most of the failures I
@@ -372,3 +360,9 @@ JointState that may never arrive), the supervisor's latching and reset interlock
 ## 📄 License
 
 MIT. See `LICENSE`.
+
+---
+
+Built by **Mo Kamel**, M.Eng. Mechatronic and Cyber-Physical Systems, Technische
+Hochschule Deggendorf.
+[Portfolio](https://mkamel7.github.io) · [LinkedIn](https://linkedin.com/in/mo-kamel7)
