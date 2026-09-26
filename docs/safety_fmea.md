@@ -15,10 +15,10 @@ even though the implementation could never be certified.
 The severity scale is qualitative on purpose. Assigning RPN numbers to a
 simulation would dress a guess up as a measurement.
 
-- **Critical** — the cell can move while a person believes it cannot.
-- **Major** — the cell stops when it should not, or a real stop is reported
+- **Critical**: the cell can move while a person believes it cannot.
+- **Major**: the cell stops when it should not, or a real stop is reported
   wrongly. Nobody is hurt; the cell is untrustworthy or unusable.
-- **Minor** — cosmetic or diagnostic only.
+- **Minor**: cosmetic or diagnostic only.
 
 ---
 
@@ -78,12 +78,12 @@ draft of this table asserted that nothing consumed `speed_scale`. That was
 wrong, and checking it rather than asserting it is how the real defect turned
 up. The chain is complete and correct: `/safety/state` → `color_sort.speed_scale`
 → `color_sort.speed_factor` → `palletizing.py:278`, which multiplies MoveIt's
-`max_velocity_scaling_factor`. What is wrong is the reading, not the plumbing.
-`_on_safety` defaults `clear_to_run` to **True** and `speed_scale` to **1.0**,
-so a message missing those fields is read as "cell clear, full speed", and an
-unparseable message is dropped with no alarm and no record, leaving the last
+`max_velocity_scaling_factor`. What was wrong was the reading, not the plumbing.
+`_on_safety` defaulted `clear_to_run` to **True** and `speed_scale` to **1.0**,
+so a message missing those fields was read as "cell clear, full speed", and an
+unparseable message was dropped with no alarm and no record, leaving the last
 values in force indefinitely. The supervisor's own inputs were fixed today for
-exactly this pattern; the consumer has it too, and the correct defaults here are
+exactly this pattern; the consumer had it too, and its defaults are now
 `False` and `0.0`.
 
 **3.5 is what remains after 3.3 is fixed.** The scaling is applied, and nothing
@@ -142,8 +142,8 @@ other end: the consumer needs to treat an aged verdict as no verdict.
 
 ## What this analysis changed
 
-Three rows moved to Closed on 2026-09-01, and all three were found by writing
-the table rather than by any test failing:
+Five rows moved to Closed on 2026-09-01. 3.3 and 3.4 are covered below; the
+other three were found by writing the table rather than by any test failing:
 
 - **2.1 and 3.1**, the fail-open inputs. Both defaults asserted the safe value
   before any source had spoken.
@@ -163,15 +163,15 @@ Of 22 identified failure modes, **6 were closed today** (2.1, 3.1, 4.1, 3.3,
 limits, and 10 remain open**, of which 8 are Critical. The largest single item
 is 5.1; 1.1, 2.2, 3.2 and 5.2b all collapse into it.
 
-The most valuable rows are not the closed ones. They are **3.3 and 3.4**, and
+The most valuable rows are not the three closed by tests. They are **3.3 and 3.4**, and
 they were found by checking a claim this document had already made. The first
 draft asserted that nothing consumed `speed_scale`. Reading the code to confirm
 it showed the opposite, that the chain into MoveIt's velocity scaling is intact,
-and showed something worse than the imagined defect: the consumer defaults a
+and showed something worse than the imagined defect: the consumer defaulted a
 missing `clear_to_run` to `True` and a missing `speed_scale` to `1.0`. The exact
-fail-open pattern fixed in the supervisor this morning is still present one node
-downstream, where a malformed safety message reads as permission to run at full
-speed.
+fail-open pattern fixed in the supervisor that morning was still present one node
+downstream, where a malformed safety message read as permission to run at full
+speed. Both defaults are now fail-safe.
 
 That is the argument for writing the table at all. Three of these rows were
 closed by tests; two of the most serious were found by a document being made to

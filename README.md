@@ -30,7 +30,7 @@ cycles and a safety event fit. Everything in it is real; nothing is cut.*
 | | |
 | --- | --- |
 | **3** | colours segmented from RGB-D, operator picks one |
-| **40** | unit tests on ROS-independent logic, run in CI |
+| **104** | unit tests on ROS-independent logic, run in CI |
 | **URSim** | validated against the real UR driver over RTDE |
 
 ROS 2 Jazzy · MoveIt 2 · OMPL · Gazebo Harmonic · RGB-D perception · OPC UA
@@ -56,13 +56,14 @@ ROS 2 Jazzy · MoveIt 2 · OMPL · Gazebo Harmonic · RGB-D perception · OPC UA
    using the depth image and the camera-to-base transform.
 4. Plans and executes a collision-aware, top-down grasp with OMPL (RRTConnect),
    attaches the part, and sorts it to one of three outfeed lanes, one per
-   colour, fanned out radially at 0, 35 and 70 degrees on a 0.62 m arc.
+   colour, fanned out radially at 0, 35 and 70 degrees on a 0.62 m arc. In the
+   sorting cell the straight descents are Pilz LIN and the transfers are OMPL.
 5. Supervises the whole thing with a functional-safety layer and publishes
    process telemetry over OPC UA to a live dashboard.
 
 ## 🏗️ Architecture
 
-Reusable, ROS-independent logic lives in `src/ur5_pick_place/` and is unit
+Reusable, ROS-independent logic lives in `src/ur5_pick_place/ur5_pick_place/` and is unit
 tested without a running robot:
 
 - `perception.py`: pinhole de-projection, quaternion/Euler transforms and the
@@ -79,11 +80,15 @@ The ROS nodes in `src/armik_moveit/` wire these into MoveIt, Gazebo and the
 fieldbus:
 
 - `detector.py`: subscribes to the RGB-D camera, detects the parts and
-  publishes the selected colour's pose.
-- `color_sort.py`: takes the perceived pick pose, builds the planning scene and
-  runs the pick-and-place to the matching outfeed lane.
-- `safety_supervisor.py`: latched e-stop, guard interlock, speed and separation
-  monitoring per ISO/TS 15066, watchdog.
+  publishes all their poses on `/detected_parts`.
+- `color_sort.py`: takes a colour order on `/target_color` (GUI or OPC UA),
+  builds the planning scene and runs the pick-and-place to the matching outfeed
+  lane. It picks from the positions it spawned the parts at, not from the
+  detector. The perception-driven pick is `pick_place_node.py` in
+  `ur5_pick_place`, and that is the one the campaign below measures.
+- `safety_supervisor.py`: latched e-stop, guard interlock, a speed reduction
+  while a person is reported in the zone (a boolean stand-in for ISO/TS 15066
+  speed and separation monitoring, see row 3.6 of the FMEA), watchdog.
 - `opcua_server.py` / `dashboard.py`: the fieldbus interface and the live
   control-room HMI.
 - `gz_twin.py` / `twin_world.py`: the Gazebo digital shadow, generated at launch
@@ -93,8 +98,11 @@ Data flow:
 
 ```
 RGB-D camera (gz) --ros_gz_bridge--> /rgbd_camera/{image,depth_image,camera_info}
-      -> detector (HSV segment + depth + camera_optical_transform)
-      -> /detected_object_pose -> color_sort (moveit_py + OMPL) -> UR5e
+      -> detector_node (HSV segment + depth + camera_optical_transform)
+      -> /detected/<colour>, /detected_object_pose -> pick_place_node (moveit_py + OMPL) -> UR5e
+
+Sorting cell:
+      /target_color (GUI or OPC UA) -> color_sort (move_group: OMPL + Pilz LIN) -> UR5e
                                       |
       /joint_states -> robot_state_publisher -> TF -> gz_twin -> Gazebo poses
                                       |
@@ -115,10 +123,14 @@ source install/setup.bash
 
 ## ▶️ Run
 
-The full sorting cell with the digital shadow:
+The full sorting cell with the digital shadow, in three terminals (the twin
+launch brings up Gazebo, the camera bridge, the detector, the digital shadow
+and the safety supervisor, but not the arm or the sorter):
 
 ```bash
+ros2 launch armik_moveit ur5e_gripper_moveit.launch.py launch_rviz:=false
 ros2 launch armik_moveit sort_cell_twin.launch.py gui:=true
+ros2 run armik_moveit color_sort
 ```
 
 The perception-driven pick-and-place on the earlier single-conveyor world:
@@ -152,10 +164,12 @@ cd src/ur5_pick_place
 python3 -m pytest test/ -q
 ```
 
-40 unit tests cover the perception-to-pose geometry, grasp planning, colour
-segmentation and depth sampling, and the path-length metrics. CI
-(`.github/workflows/ci.yml`) lints with ruff, runs these tests on a plain
-runner, and separately builds the packages and runs `colcon test` in a ROS 2
+These 80 unit tests cover the perception-to-pose geometry, grasp planning,
+colour segmentation and depth sampling, the path-length metrics, the typed
+action outcomes, the placement checks, and the campaign figures below. CI
+(`.github/workflows/ci.yml`) lints with ruff, runs these tests plus the 24
+safety-logic and OPC UA access tests in `src/armik_moveit/test/` on a plain
+runner, and separately builds `ur5_pick_place` and runs `colcon test` in a ROS 2
 Jazzy container. `tools/test_twin_mirror.py` and `tools/test_twin_grasp.py`
 check the digital shadow against TF and check that a carried part holds a fixed
 offset in the gripper frame.
@@ -190,7 +204,7 @@ window. This replaces the aggregate success rate this README previously declined
 | detection | **100 of 100** |
 | end to end pick and place | **92 of 100** |
 | perception error | p50 **4.0 mm**, p95 **7.3 mm**, worst **8.9 mm** |
-| trial duration | p50 45 s, p95 63 s, worst 346 s |
+| trial duration | p50 45 s, p95 63 s, worst 345 s |
 | failed inside the harness | 0 |
 
 Every row is in [`docs/benchmark_placements.csv`](docs/benchmark_placements.csv), and
@@ -200,7 +214,7 @@ this table and that file disagree.
 
 **What the eight failures are, and what they are not.** All eight failed in motion, at the `lift` or
 `retreat` stage, after OMPL gave up on three planning attempts. None failed at perception: the
-detector found the part in all 100 trials, and the pose error on the eight failures (p50 3.3 mm) is
+detector found the part in all 100 trials, and the pose error on the eight failures (median 3.3 mm) is
 no worse than on the 92 successes. So this is a planning result, not a vision one.
 
 **They are not explained by where the part was.** Watching the run, the first failures looked like a
@@ -308,8 +322,8 @@ that did not exist. And `MoveRelative` had no IK frame, so it had no frame to
 drive along the direction and returned nothing at all, which reads as an
 impossible descent rather than a stage that was never told what to move.
 
-**It is ten times slower and that is not a footnote.** 605 s to plan one pick
-with two grasp candidates, against roughly 45 s for the imperative version to
+**It is more than ten times slower and that is not a footnote.** 605 s to plan
+one pick, 19 grasp candidates generated and two surviving the descent, against roughly 45 s for the imperative version to
 plan AND execute a whole cycle. Nearly all of it is the OMPL connection to each
 candidate. So this is a diagnostic instrument and a grasp-alternative search,
 not a replacement for the pick the cell runs.
@@ -363,6 +377,6 @@ MIT. See `LICENSE`.
 
 ---
 
-Built by **Mo Kamel**, M.Eng. Mechatronic and Cyber-Physical Systems, Technische
+Built by **Mo Kamel**, M.Eng. student in Mechatronic and Cyber-Physical Systems, Technische
 Hochschule Deggendorf.
 [Portfolio](https://mkamel7.github.io) · [LinkedIn](https://linkedin.com/in/mo-kamel7)
