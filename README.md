@@ -7,10 +7,14 @@
 
 
 Vision-guided, collision-aware pick-and-place for a simulated Universal Robots
-UR5e with MoveIt 2 on ROS 2 Jazzy, framed as an industrial colour-sorting cell.
-An overhead RGB-D camera segments three coloured parts by HSV, the selected one
-is lifted to a 3D pose in the robot base frame from the depth image, and OMPL
-plans a collision-aware top-down grasp onto a moving conveyor.
+UR5e with MoveIt 2 on ROS 2 Jazzy. An overhead RGB-D camera segments three
+coloured parts by HSV, the selected one is lifted to a 3D pose in the robot base
+frame from the depth image, and OMPL plans a collision-aware top-down grasp to
+it. That perception-driven pick (`pick_place_node.py`) is what the 100-trial
+campaign below measures. The colour-sorting cell built on top of it is a
+separate node, `color_sort.py`, and it picks from the positions it spawned the
+parts at rather than from the detector; wiring it to the camera is listed under
+future work.
 
 This is the sequel to writing forward kinematics, inverse kinematics and
 trajectories by hand in
@@ -24,7 +28,9 @@ live cell dashboard.
 
 *Four views at once: what the camera sees, the Gazebo digital shadow, the real
 UR teach pendant, and live process telemetry. 40 s, played at 4.5x so three
-cycles and a safety event fit. Everything in it is real; nothing is cut.*
+cycles and a safety event fit. Everything in it is real; nothing is cut. The
+camera and detector run live here, but the sorting cell takes its pick
+positions from where it spawned the parts, not from the detector.*
 [Full-quality video (mp4)](https://github.com/MKamel7/moveit-ur5-pick-place/releases/latest).
 
 | | |
@@ -363,6 +369,9 @@ JointState that may never arrive), the supervisor's latching and reset interlock
 **Still open:**
 
 - **Lint `tools/`.** CI runs `ruff check src/`, so it is excluded by omission rather than by rule.
+- **Drive the sorting cell from the detector.** `color_sort.py` still picks from its own spawn
+  positions. Subscribing it to `/detected_parts` would make the cell in the demo vision-guided in
+  the same sense as the campaign pick.
 
 **Then:**
 
